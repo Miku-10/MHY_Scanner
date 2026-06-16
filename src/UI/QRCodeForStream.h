@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <atomic>
 #include <string_view>
@@ -44,6 +44,7 @@ public:
 Q_SIGNALS:
     void loginResults(const ScanRet ret);
     void loginConfirm(const GameType gameType, bool b);
+    void streamError(const QString& errorMessage);
 
 private:
     std::mutex mtx;

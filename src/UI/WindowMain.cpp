@@ -1,4 +1,4 @@
-﻿#include "WindowMain.h"
+#include "WindowMain.h"
 
 #include <fstream>
 #include <filesystem>
@@ -48,7 +48,11 @@ WindowMain::WindowMain(QWidget* parent) :
     });
     connect(this, &WindowMain::LiveStreamLinkError, this, [&](LiveStreamStatus status) {
         liveIdError(status);
-    });
+        // 确保UI状态恢复
+        ui.pBtStream->setEnabled(true);
+        ui.pBtStream->setText("监视直播间");
+        ui.pBtstartScreen->setEnabled(true);
+    }, Qt::QueuedConnection);
     connect(this, &WindowMain::AccountNotSelected, this, [&]() {
         QMessageBox::information(this, "提示", "没有选择任何账号", QMessageBox::Yes);
         pBtStop();
@@ -62,6 +66,13 @@ WindowMain::WindowMain(QWidget* parent) :
     connect(&t1, &QRCodeForScreen::loginConfirm, this, &WindowMain::loginConfirmTip);
     connect(&t2, &QRCodeForStream::loginResults, this, &WindowMain::islogin);
     connect(&t2, &QRCodeForStream::loginConfirm, this, &WindowMain::loginConfirmTip);
+    connect(&t2, &QRCodeForStream::streamError, this, [this](const QString& errorMessage) {
+        QMessageBox::critical(this, "直播流错误", errorMessage);
+        // 恢复UI状态
+        ui.pBtStream->setEnabled(true);
+        ui.pBtStream->setText("监视直播间");
+        ui.pBtstartScreen->setEnabled(true);
+    }, Qt::QueuedConnection);
     connect(&configinitload, &configInitLoad::userinfoTrue, this, &WindowMain::configInitUpdate);
     connect(ui.tableWidget, &QTableWidget::itemChanged, this, &WindowMain::updateNote);
 

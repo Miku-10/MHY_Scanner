@@ -1,4 +1,4 @@
-﻿#include "QRCodeForStream.h"
+#include "QRCodeForStream.h"
 
 #include <string>
 #include <string_view>
@@ -255,15 +255,18 @@ void QRCodeForStream::setUrl(const std::string& url, const std::map<std::string,
 
 auto QRCodeForStream::init() -> bool
 {
-    pAVFormatContext = avformat_alloc_context();
     if (avformat_open_input(&pAVFormatContext, streamUrl.c_str(), NULL, &pAvdictionary) != 0)
     {
-        std::cerr << "Error opening input file" << std::endl;
+        std::string error_msg = "无法打开直播流。请检查：\n1. 直播间ID是否正确\n2. 直播是否正在进行\n3. 网络连接是否正常";
+        std::cerr << "[FFmpeg] " << error_msg << std::endl;
+        emit streamError(QString::fromStdString(error_msg));
         return false;
     }
     if (avformat_find_stream_info(pAVFormatContext, NULL) < 0)
     {
-        std::cerr << "Error finding stream information" << std::endl;
+        std::string error_msg = "无法获取流信息。直播流可能已中断或格式不支持";
+        std::cerr << "[FFmpeg] " << error_msg << std::endl;
+        emit streamError(QString::fromStdString(error_msg));
         return false;
     }
     AVStream* videoStream = nullptr;
@@ -277,29 +280,44 @@ auto QRCodeForStream::init() -> bool
     }
     if (videoStream == nullptr)
     {
-        std::cerr << "No video stream found" << std::endl;
+        std::string error_msg = "直播流中未找到视频流。可能是纯音频直播";
+        std::cerr << "[FFmpeg] " << error_msg << std::endl;
+        emit streamError(QString::fromStdString(error_msg));
         return false;
     }
     videoStreamIndex = videoStream->index;
     const AVCodec* decoder{ avcodec_find_decoder(videoStream->codecpar->codec_id) };
     if (decoder == nullptr)
     {
-        std::cerr << "Codec not found" << std::endl;
+        std::string error_msg = "未找到视频解码器。视频编码格式可能不支持";
+        std::cerr << "[FFmpeg] " << error_msg << std::endl;
+        emit streamError(QString::fromStdString(error_msg));
         return false;
     }
     pAVCodecContext = avcodec_alloc_context3(decoder);
     avcodec_parameters_to_context(pAVCodecContext, videoStream->codecpar);
     if (avcodec_open2(pAVCodecContext, decoder, NULL) < 0)
     {
-        std::cerr << "Error opening codec" << std::endl;
+        std::string error_msg = "无法打开视频解码器。可能是解码器初始化失败";
+        std::cerr << "[FFmpeg] " << error_msg << std::endl;
+        emit streamError(QString::fromStdString(error_msg));
         return false;
     }
     setStreamHW();
     pSwsContext = sws_getContext(
         pAVCodecContext->width, pAVCodecContext->height, pAVCodecContext->pix_fmt,
         videoStreamWidth, videoStreamHeight, AV_PIX_FMT_BGR24, SWS_BILINEAR, NULL, NULL, NULL);
+    if (pSwsContext == nullptr)
+    {
+        std::string error_msg = "无法初始化图像转换器。可能是内存不足";
+        std::cerr << "[FFmpeg] " << error_msg << std::endl;
+        emit streamError(QString::fromStdString(error_msg));
+        return false;
+    }
     pAVPacket = av_packet_alloc();
     pAVFrame = av_frame_alloc();
+    std::cerr << "[FFmpeg] 直播流初始化成功，分辨率: " 
+              << videoStreamWidth << "x" << videoStreamHeight << std::endl;
     return true;
 }
 
@@ -357,6 +375,8 @@ void QRCodeForStream::run()
             break;
         }
     }
+    // 注意：init()失败时已经在init()内部发射了streamError信号
+    // 这里不需要再发射loginResults信号
     if (ret == ScanRet::LIVESTOP)
     {
         emit loginResults(ret);

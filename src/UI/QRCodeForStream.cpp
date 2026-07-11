@@ -1,10 +1,18 @@
 #include "QRCodeForStream.h"
 
+#include <chrono>
 #include <string>
 #include <string_view>
 
 #include "QRScanner.h"
 #include "MhyApi.hpp"
+
+// 直播流帧提交限流间隔（毫秒）。
+// 直播流帧率高（30~60fps），若对每一帧都调用 threadPool.tryStart 提交 QR 解码，
+// 线程池会被占满，tryStart 在无空闲线程时静默返回 false 丢帧（含二维码帧），
+// 表现为“大概率无反应”。此处与屏幕扫码路径（QRCodeForScreen 的 DELAYED=200）保持一致，
+// 每 200ms 只提交一帧，确保线程池始终有空闲线程可靠完成解码。
+static constexpr auto kStreamSubmitInterval = std::chrono::milliseconds(200);
 
 QRCodeForStream::QRCodeForStream(QObject* parent) :
     QThread(parent),
@@ -52,6 +60,7 @@ void QRCodeForStream::setServerType(const ServerType servertype)
 
 void QRCodeForStream::LoginOfficial()
 {
+    auto lastSubmit = std::chrono::steady_clock::now() - kStreamSubmitInterval;
     while (m_stop.load())
     {
         if (av_read_frame(pAVFormatContext, pAVPacket) < 0)
@@ -72,6 +81,14 @@ void QRCodeForStream::LoginOfficial()
         }
         while (avcodec_receive_frame(pAVCodecContext, pAVFrame) == 0)
         {
+            // 限流：仅每 kStreamSubmitInterval 提交一帧做 QR 解码，
+            // 其余帧仅从解码器排空丢弃，避免线程池被占满导致静默丢帧。
+            const auto now = std::chrono::steady_clock::now();
+            if (now - lastSubmit < kStreamSubmitInterval)
+            {
+                continue;
+            }
+            lastSubmit = now;
             cv::Mat img(videoStreamHeight, videoStreamWidth, CV_8UC3);
             uint8_t* dstData[1] = { img.data };
             const int dstLinesize[1] = { static_cast<int>(img.step) };
@@ -136,6 +153,7 @@ void QRCodeForStream::LoginOfficial()
 
 void QRCodeForStream::LoginBH3BiliBili()
 {
+    auto lastSubmit = std::chrono::steady_clock::now() - kStreamSubmitInterval;
     while (m_stop.load())
     {
         if (av_read_frame(pAVFormatContext, pAVPacket) < 0)
@@ -157,6 +175,14 @@ void QRCodeForStream::LoginBH3BiliBili()
 
         while (avcodec_receive_frame(pAVCodecContext, pAVFrame) == 0)
         {
+            // 限流：仅每 kStreamSubmitInterval 提交一帧做 QR 解码，
+            // 其余帧仅从解码器排空丢弃，避免线程池被占满导致静默丢帧。
+            const auto now = std::chrono::steady_clock::now();
+            if (now - lastSubmit < kStreamSubmitInterval)
+            {
+                continue;
+            }
+            lastSubmit = now;
             cv::Mat img(videoStreamHeight, videoStreamWidth, CV_8UC3);
             uint8_t* dstData[1] = { img.data };
             const int dstLinesize[1] = { static_cast<int>(img.step) };

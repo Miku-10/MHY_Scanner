@@ -1,5 +1,7 @@
+// ── 项目头文件 ──
 #include "LiveStreamLink.h"
 
+// ── 标准库 ──
 #include <format>
 #include <fstream>
 #include <iostream>
@@ -7,17 +9,31 @@
 #include <random>
 #include <chrono>
 
+// ── 第三方 ──
 #include <nlohmann/json.hpp>
 #include <cpr/cpr.h>
 
+/**
+ * @brief B站直播信息获取器构造。
+ * @param roomID 用户输入的直播间短号（可能为临时房间号，需经 room_init 解析为真实房间号）。
+ */
 LiveBili::LiveBili(const std::string& roomID) :
     roomID(roomID)
 {
 }
 
+/**
+ * @brief 获取 B站直播流地址。
+ *
+ * 先调用 room_init 拿到房间初始化信息与真实房间号，再据此请求播放地址
+ * （v2_play_info），拼出可直连的 .flv 直播流 URL。
+ *
+ * @return LiveStreamInfo 含状态（Normal/Absent/NotLive/Error）与流地址；
+ *         失败时地址为空字符串。
+ */
 LiveStreamInfo LiveBili::GetLiveStreamInfo()
 {
-    // 获取房间初始化信息
+    // 第一步：获取房间初始化信息（含真实房间号与开播状态）。带 10 秒超时。
     auto r = cpr::Get(cpr::Url{ std::format("{}?id={}", api::live::bili::room_init.c_str(), roomID) }, cpr::Timeout{10000});
     if (r.error || r.status_code != 200 || r.text.empty())
     {
@@ -64,8 +80,14 @@ LiveStreamInfo LiveBili::GetLiveStreamInfo()
     }
 }
 
+/**
+ * @brief 根据真实房间号请求播放地址，返回拼好的直播流直链。
+ * @param realRoomID room_init 解析出的真实房间号。
+ */
 std::string LiveBili::GetLinkByRealRoomID(const std::string& realRoomID)
 {
+    // 播放地址请求参数：codec=0（默认）、format=0,2（flv）、protocol=0,1（HTTP-FLV/HTTP-HLS）、
+    // qn=10000（原画）。这些参数与官方 Web 端保持一致。
     const cpr::Parameters params = {
 #if 0
         appkey:iVGUTjsxvpLeuDCf
@@ -105,8 +127,19 @@ std::string LiveBili::GetLinkByRealRoomID(const std::string& realRoomID)
     return GetStreamUrl(params);
 }
 
+/**
+ * @brief 调用 v2_play_info 接口，解析返回 JSON 并拼出直播流直链。
+ *
+ * 直链格式：host + base_url + extra（取自 codec[0].url_info[0]）。
+ * 过程中对各类异常（网络错误 / 字段缺失 / 业务码非 0）均输出中文日志，
+ * 便于排查「拿不到流地址」类问题。
+ *
+ * @param param 播放地址请求参数。
+ * @return 直链；任意失败返回空字符串。
+ */
 std::string LiveBili::GetStreamUrl(const cpr::Parameters param)
 {
+    // 请求播放地址接口（v2_play_info），带 10 秒超时。
     auto r = cpr::Get(cpr::Url{ api::live::bili::v2_play_info }, param, cpr::Timeout{10000});
     if (r.error)
     {
@@ -196,16 +229,28 @@ std::string LiveBili::GetStreamUrl(const cpr::Parameters param)
     }
 }
 
+/**
+ * @brief 抖音直播信息获取器构造。
+ * @param roomID 抖音直播间 web_rid（房间短号）。
+ */
 LiveDouyin::LiveDouyin(const std::string& roomID) :
     m_roomID(roomID)
 {
 }
 
+/**
+ * @brief 获取抖音直播流地址。
+ *
+ * 携带 UA / Referer / Origin 等浏览器头请求直播间信息接口，
+ * 解析返回的 JSON 拿到 flv 拉流地址。状态 2 = 开播，4 = 未开播。
+ *
+ * @return LiveStreamInfo 含状态与流地址；失败时地址为空。
+ */
 LiveStreamInfo LiveDouyin::GetLiveStreamInfo()
 {
     try
     {
-        // 构建请求参数
+        // 构建请求参数（使用浏览器 UA 与直播域名 Referer，模拟网页端请求）
         std::string user_agent =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36";
@@ -260,10 +305,16 @@ LiveStreamInfo LiveDouyin::GetLiveStreamInfo()
     }
 }
 
+/**
+ * @brief 从抖音直播间信息 JSON 中解析出 flv 拉流地址。
+ * @param data 直播间信息接口返回的 data 字段。
+ * @return flv 直链；解析失败返回空。
+ */
 std::string LiveDouyin::GetStreamLinkFromResponse(const nlohmann::json& data)
 {
     try
     {
+        // 抖音返回结构有两种：pull_datas（双屏流）与 live_core_sdk_data，均取 origin.main.flv。
         const auto& stream_url = data["stream_url"];
 
         if (stream_url.contains("pull_datas"))
@@ -295,6 +346,12 @@ std::string LiveDouyin::GetStreamLinkFromResponse(const nlohmann::json& data)
     }
 }
 
+/**
+ * @brief 取流总入口：按平台分发到对应实现。
+ * @param platform 直播平台（BiliBili / Douyin）。
+ * @param roomID   直播间号。
+ * @return LiveStreamInfo 含状态与流地址。
+ */
 LiveStreamInfo GetLiveInfo(const LivePlatform platform, const std::string& roomID)
 {
     switch (platform)

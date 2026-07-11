@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <string_view>
 
 extern "C"
@@ -65,7 +66,7 @@ private:
     int videoStreamIndex{ 0 };
     int videoStreamWidth{};
     int videoStreamHeight{};
-    const int threadNumber{ 2 };
+    const int threadNumber{ 3 };
     QThreadPool threadPool;
     std::atomic<bool> m_stop;
 };

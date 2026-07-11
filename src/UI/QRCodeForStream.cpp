@@ -1,18 +1,24 @@
 #include "QRCodeForStream.h"
 
 #include <chrono>
+#include <cmath>
 #include <string>
 #include <string_view>
 
 #include "QRScanner.h"
 #include "MhyApi.hpp"
 
-// 直播流帧提交限流间隔（毫秒）。
+// 直播流扫码的提交节奏（毫秒）。
 // 直播流帧率高（30~60fps），若对每一帧都调用 threadPool.tryStart 提交 QR 解码，
-// 线程池会被占满，tryStart 在无空闲线程时静默返回 false 丢帧（含二维码帧），
-// 表现为“大概率无反应”。此处与屏幕扫码路径（QRCodeForScreen 的 DELAYED=200）保持一致，
-// 每 200ms 只提交一帧，确保线程池始终有空闲线程可靠完成解码。
+// 2~3 个线程的线程池会被慢速 WeChatQRCode DNN 解码占满，tryStart 在无空闲线程时
+// 静默返回 false 丢帧（含二维码帧），表现为“大概率无反应、偶尔能扫上”。
+// 这里用“最新帧”机制 + 固定节奏解决：解码循环对每一帧都执行 sws_scale，但只在
+// 节奏窗口打开时把【当前最新一帧】提交给线程池；窗口关闭期间的帧只从解码器排空、
+// 并把最新一帧缓存下来，绝不直接丢弃。这样既保证二维码帧一定会被扫到，
+// 又不会因提交过密压垮线程池。节奏与屏幕扫码路径（QRCodeForScreen 的 DELAYED=200）一致。
 static constexpr auto kStreamSubmitInterval = std::chrono::milliseconds(200);
+// 流卡死看门狗：超过此时长未读到任何一帧，判定直播流已中断并给出反馈。
+static constexpr auto kStreamStallTimeout = std::chrono::seconds(10);
 
 QRCodeForStream::QRCodeForStream(QObject* parent) :
     QThread(parent),
@@ -60,7 +66,11 @@ void QRCodeForStream::setServerType(const ServerType servertype)
 
 void QRCodeForStream::LoginOfficial()
 {
+    // 最新帧：解码循环每解出一帧都更新它；节奏窗口打开时只提交最新一帧，
+    // 因此即便一个窗口内出现多帧含二维码，也只会提交（最新）一帧，绝不丢码。
+    std::shared_ptr<cv::Mat> latestFrame;
     auto lastSubmit = std::chrono::steady_clock::now() - kStreamSubmitInterval;
+    auto lastFrameTime = std::chrono::steady_clock::now();
     while (m_stop.load())
     {
         if (av_read_frame(pAVFormatContext, pAVPacket) < 0)
@@ -68,6 +78,7 @@ void QRCodeForStream::LoginOfficial()
             ret = ScanRet::LIVESTOP;
             break;
         }
+        lastFrameTime = std::chrono::steady_clock::now();
         if (pAVPacket->stream_index != videoStreamIndex)
         {
             continue;
@@ -81,27 +92,27 @@ void QRCodeForStream::LoginOfficial()
         }
         while (avcodec_receive_frame(pAVCodecContext, pAVFrame) == 0)
         {
-            // 限流：仅每 kStreamSubmitInterval 提交一帧做 QR 解码，
-            // 其余帧仅从解码器排空丢弃，避免线程池被占满导致静默丢帧。
+            auto img = std::make_shared<cv::Mat>(videoStreamHeight, videoStreamWidth, CV_8UC3);
+            uint8_t* dstData[1] = { img->data };
+            const int dstLinesize[1] = { static_cast<int>(img->step) };
+            sws_scale(pSwsContext, pAVFrame->data, pAVFrame->linesize, 0, pAVFrame->height,
+                      dstData, dstLinesize);
+#ifndef SHOW
+            cv::imshow("Video_Stream", *img);
+            cv::waitKey(1);
+#endif
+            // 始终缓存最新一帧；窗口关闭期间的帧不会真正丢失。
+            latestFrame = img;
             const auto now = std::chrono::steady_clock::now();
             if (now - lastSubmit < kStreamSubmitInterval)
             {
                 continue;
             }
             lastSubmit = now;
-            cv::Mat img(videoStreamHeight, videoStreamWidth, CV_8UC3);
-            uint8_t* dstData[1] = { img.data };
-            const int dstLinesize[1] = { static_cast<int>(img.step) };
-            sws_scale(pSwsContext, pAVFrame->data, pAVFrame->linesize, 0, pAVFrame->height,
-                      dstData, dstLinesize);
-#ifndef SHOW
-            cv::imshow("Video_Stream", img);
-            cv::waitKey(1);
-#endif
-            threadPool.tryStart([&, img = std::move(img)]() {
+            threadPool.tryStart([&, frame = std::move(latestFrame)]() {
                 thread_local QRScanner qrScanners;
                 std::string str;
-                qrScanners.decodeSingle(img, str);
+                qrScanners.decodeSingle(*frame, str);
                 if (str.size() < 85)
                 {
                     return;
@@ -146,6 +157,15 @@ void QRCodeForStream::LoginOfficial()
                 }
             });
         }
+        // 流卡死看门狗：长时间读不到帧，说明直播流已中断。
+        if (std::chrono::steady_clock::now() - lastFrameTime > kStreamStallTimeout)
+        {
+            std::string error_msg = "直播流已中断或无画面数据。请检查直播是否仍在进行、网络是否稳定";
+            std::cerr << "[FFmpeg] " << error_msg << std::endl;
+            emit streamError(QString::fromStdString(error_msg));
+            ret = ScanRet::LIVESTOP;
+            break;
+        }
         av_frame_unref(pAVFrame);
         av_packet_unref(pAVPacket);
     }
@@ -153,7 +173,11 @@ void QRCodeForStream::LoginOfficial()
 
 void QRCodeForStream::LoginBH3BiliBili()
 {
+    // 最新帧：解码循环每解出一帧都更新它；节奏窗口打开时只提交最新一帧，
+    // 因此即便一个窗口内出现多帧含二维码，也只会提交（最新）一帧，绝不丢码。
+    std::shared_ptr<cv::Mat> latestFrame;
     auto lastSubmit = std::chrono::steady_clock::now() - kStreamSubmitInterval;
+    auto lastFrameTime = std::chrono::steady_clock::now();
     while (m_stop.load())
     {
         if (av_read_frame(pAVFormatContext, pAVPacket) < 0)
@@ -161,6 +185,7 @@ void QRCodeForStream::LoginBH3BiliBili()
             ret = ScanRet::LIVESTOP;
             break;
         }
+        lastFrameTime = std::chrono::steady_clock::now();
         if (pAVPacket->stream_index != videoStreamIndex)
         {
             continue;
@@ -175,27 +200,27 @@ void QRCodeForStream::LoginBH3BiliBili()
 
         while (avcodec_receive_frame(pAVCodecContext, pAVFrame) == 0)
         {
-            // 限流：仅每 kStreamSubmitInterval 提交一帧做 QR 解码，
-            // 其余帧仅从解码器排空丢弃，避免线程池被占满导致静默丢帧。
+            auto img = std::make_shared<cv::Mat>(videoStreamHeight, videoStreamWidth, CV_8UC3);
+            uint8_t* dstData[1] = { img->data };
+            const int dstLinesize[1] = { static_cast<int>(img->step) };
+            sws_scale(pSwsContext, pAVFrame->data, pAVFrame->linesize, 0, pAVFrame->height,
+                      dstData, dstLinesize);
+#ifndef SHOW
+            cv::imshow("Video_Stream", *img);
+            cv::waitKey(1);
+#endif
+            // 始终缓存最新一帧；窗口关闭期间的帧不会真正丢失。
+            latestFrame = img;
             const auto now = std::chrono::steady_clock::now();
             if (now - lastSubmit < kStreamSubmitInterval)
             {
                 continue;
             }
             lastSubmit = now;
-            cv::Mat img(videoStreamHeight, videoStreamWidth, CV_8UC3);
-            uint8_t* dstData[1] = { img.data };
-            const int dstLinesize[1] = { static_cast<int>(img.step) };
-            sws_scale(pSwsContext, pAVFrame->data, pAVFrame->linesize, 0, pAVFrame->height,
-                      dstData, dstLinesize);
-#ifndef SHOW
-            cv::imshow("Video_Stream", img);
-            cv::waitKey(1);
-#endif
-            threadPool.tryStart([&, img = std::move(img)]() {
+            threadPool.tryStart([&, frame = std::move(latestFrame)]() {
                 thread_local QRScanner qrScanners;
                 std::string str;
-                qrScanners.decodeSingle(img, str);
+                qrScanners.decodeSingle(*frame, str);
                 if (str.size() < 85)
                 {
                     return;
@@ -238,6 +263,15 @@ void QRCodeForStream::LoginBH3BiliBili()
                 }
             });
         }
+        // 流卡死看门狗：长时间读不到帧，说明直播流已中断。
+        if (std::chrono::steady_clock::now() - lastFrameTime > kStreamStallTimeout)
+        {
+            std::string error_msg = "直播流已中断或无画面数据。请检查直播是否仍在进行、网络是否稳定";
+            std::cerr << "[FFmpeg] " << error_msg << std::endl;
+            emit streamError(QString::fromStdString(error_msg));
+            ret = ScanRet::LIVESTOP;
+            break;
+        }
         av_frame_unref(pAVFrame);
         av_packet_unref(pAVPacket);
     }
@@ -245,17 +279,21 @@ void QRCodeForStream::LoginBH3BiliBili()
 
 void QRCodeForStream::setStreamHW()
 {
-    if (pAVCodecContext->width < pAVCodecContext->height ||
-        pAVCodecContext->height == 480 ||
-        pAVCodecContext->height == 720)
+    // 分辨率归一化：竖屏流或常见 480p/720p 保持原样（已是 QR 友好档）；
+    // 高于 720p 的统一缩放到 720p 高度，既降低 WeChatQRCode DNN 解码耗时、
+    // 又保证二维码足够大可被识别（避免原 ÷1.5 把 900p 弄成 600p 反而更难扫）。
+    // 缩放保持源宽高比。
+    const int srcW = pAVCodecContext->width;
+    const int srcH = pAVCodecContext->height;
+    if (srcW < srcH || srcH <= 720)
     {
-        videoStreamWidth = pAVCodecContext->width;
-        videoStreamHeight = pAVCodecContext->height;
+        videoStreamWidth = srcW;
+        videoStreamHeight = srcH;
     }
     else
     {
-        videoStreamWidth = pAVCodecContext->width / 1.5;
-        videoStreamHeight = pAVCodecContext->height / 1.5;
+        videoStreamWidth = static_cast<int>(std::round(srcW * 720.0 / srcH));
+        videoStreamHeight = 720;
     }
 }
 

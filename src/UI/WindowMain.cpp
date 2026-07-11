@@ -19,6 +19,121 @@ WindowMain::WindowMain(QWidget* parent) :
 {
     QApplication::setFont(QFont("微软雅黑", 9));
     ui.setupUi(this);
+
+    // 统一视觉主题（浅色精致风：清爽蓝青主色 #2B7DE9 + teal 激活态 #12B5A8 + 柔和浅灰层次）
+    // 仅做配色/圆角/hover/checked 等质感提升，不改动 .ui 布局位置。
+    this->setStyleSheet(R"(
+        /* ===== 基础 ===== */
+        QMainWindow, QWidget#centralWidget {
+            background-color: #EEF1F6;
+            color: #2B2F3A;
+        }
+        QLabel {
+            color: #2B2F3A;
+            font-size: 13px;
+        }
+        QLabel#labelUname, QLabel#labelLiveName, QLabel#labelLiveName_2 {
+            color: #4B5563;
+        }
+
+        /* ===== 按钮 ===== */
+        QPushButton {
+            background-color: #2B7DE9;
+            color: #FFFFFF;
+            border: none;
+            border-radius: 7px;
+            padding: 6px 16px;
+            font-size: 13px;
+            min-height: 30px;
+        }
+        QPushButton:hover { background-color: #1E63C0; }
+        QPushButton:pressed { background-color: #1857A8; }
+        QPushButton:disabled { background-color: #B9C4D4; color: #EEF1F6; }
+
+        /* 监视按钮（checkable）：默认描边风，激活(监视中)实色高亮 */
+        QPushButton#pBtstartScreen, QPushButton#pBtStream {
+            background-color: #FFFFFF;
+            color: #2B7DE9;
+            border: 1.5px solid #2B7DE9;
+        }
+        QPushButton#pBtstartScreen:hover, QPushButton#pBtStream:hover {
+            background-color: #EAF2FE;
+        }
+        QPushButton#pBtstartScreen:checked, QPushButton#pBtStream:checked {
+            background-color: #12B5A8;
+            color: #FFFFFF;
+            border: 1.5px solid #12B5A8;
+        }
+
+        /* ===== 输入框 ===== */
+        QLineEdit {
+            background-color: #FFFFFF;
+            border: 1px solid #D0D7E2;
+            border-radius: 6px;
+            padding: 3px 8px;
+            color: #2B2F3A;
+            font-size: 13px;
+        }
+        QLineEdit:focus { border: 1.5px solid #2B7DE9; }
+        QLineEdit:read-only { background-color: #F4F6F9; color: #5B6472; }
+
+        /* ===== 下拉框 ===== */
+        QComboBox {
+            background-color: #FFFFFF;
+            border: 1px solid #D0D7E2;
+            border-radius: 6px;
+            padding: 3px 8px;
+            color: #2B2F3A;
+            font-size: 13px;
+            min-height: 22px;
+        }
+        QComboBox:hover { border: 1.5px solid #2B7DE9; }
+        QComboBox::drop-down { border: none; width: 20px; }
+        QComboBox QAbstractItemView {
+            background-color: #FFFFFF;
+            border: 1px solid #D0D7E2;
+            selection-background-color: #EAF2FE;
+            color: #2B2F3A;
+        }
+
+        /* ===== 复选框 ===== */
+        QCheckBox {
+            color: #2B2F3A;
+            font-size: 13px;
+            spacing: 6px;
+        }
+        QCheckBox::indicator {
+            width: 16px;
+            height: 16px;
+            border: 1.5px solid #C2CAD6;
+            border-radius: 4px;
+            background-color: #FFFFFF;
+        }
+        QCheckBox::indicator:checked {
+            background-color: #2B7DE9;
+            border: 1.5px solid #2B7DE9;
+        }
+
+        /* ===== 富文本链接（项目源码） ===== */
+        QLabel a {
+            color: #2B7DE9;
+        }
+
+        /* ===== 菜单栏 ===== */
+        QMenuBar {
+            background-color: #FFFFFF;
+            border-bottom: 1px solid #E2E8F0;
+        }
+        QMenuBar::item { padding: 5px 10px; border-radius: 4px; }
+        QMenuBar::item:selected { background-color: #EAF2FE; }
+        QMenu {
+            background-color: #FFFFFF;
+            border: 1px solid #E2E8F0;
+            padding: 4px;
+        }
+        QMenu::item { padding: 6px 22px; border-radius: 4px; }
+        QMenu::item:selected { background-color: #EAF2FE; color: #2B7DE9; }
+    )");
     connect(ui.action1_3, &QAction::triggered, this, &WindowMain::AddAccount);
     connect(ui.action1_4, &QAction::triggered, this, &WindowMain::SetDefaultAccount);
     connect(ui.action2_3, &QAction::triggered, this, &WindowMain::DeleteAccount);

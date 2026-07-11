@@ -144,30 +144,34 @@
       <height>271</height>
      </rect>
     </property>
-    <property name="styleSheet">
-     <string notr="true">QTableWidget 
-{
-    background:#fbfdfd;
-    border:1px solid #bfb1f6;
- 
-    font-size:13px;                
+  <property name="styleSheet">
+   <string notr="true">QTableWidget {
+    background:#FFFFFF;
+    border:1px solid #E2E8F0;
+    border-radius:8px;
+    gridline-color:#EDF1F6;
+    font-size:13px;
     font-family:&quot;Microsoft YaHei&quot;;
-    color:#37c61a;                
+    color:#2B2F3A;
 }
- 
-QTableWidget::item 
-{
-	border:none;
-    border-bottom:1px solid #bfb1f6;
-    border-right:1px solid #bfb1f6;
+QTableWidget::item {
+    border:none;
+    border-bottom:1px solid #EDF1F6;
+    padding:5px;
 }
- 
-QTableWidget::item:selected    
-{
-    color:red;        
-    background:#cecbd7;
+QTableWidget::item:selected {
+    color:#2B7DE9;
+    background:#EAF2FE;
+}
+QHeaderView::section {
+    background:#F4F7FB;
+    color:#4B5563;
+    border:none;
+    border-bottom:2px solid #2B7DE9;
+    padding:6px;
+    font-weight:600;
 }</string>
-    </property>
+  </property>
    </widget>
    <widget class="QComboBox" name="comboBox">
     <property name="geometry">

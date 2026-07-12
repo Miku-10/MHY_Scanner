@@ -1,10 +1,24 @@
 ﻿#include "QRCodeForStream.h"
 
+#include <chrono>
+#include <memory>
 #include <string>
 #include <string_view>
 
 #include "QRScanner.h"
 #include "MhyApi.hpp"
+
+// 直播流扫码的提交节奏（毫秒）。
+// 直播流帧率高（30~60fps），若对每一帧都调用 threadPool.tryStart 提交 QR 解码，
+// 2~3 个线程的线程池会被慢速 WeChatQRCode DNN 解码占满，tryStart 在无空闲线程时
+// 静默返回 false 丢帧（含二维码帧），表现为「大概率无反应、偶尔能扫上」。
+// 这里用「最新帧」机制 + 固定节奏解决：解码循环对每一帧都执行 sws_scale，但只在
+// 节奏窗口打开时把【当前最新一帧】提交给线程池；窗口关闭期间的帧只从解码器排空、
+// 并把最新一帧缓存下来，绝不直接丢弃。这样既保证二维码帧一定会被扫到，
+// 又不会因提交过密压垮线程池。节奏与屏幕扫码路径保持一致（200ms）。
+static constexpr auto kStreamSubmitInterval = std::chrono::milliseconds(200);
+// 流卡死看门狗：超过此时长未读到任何一帧，判定直播流已中断并给出反馈。
+static constexpr auto kStreamStallTimeout = std::chrono::seconds(10);
 
 QRCodeForStream::QRCodeForStream(QObject* parent) :
     QThread(parent),
@@ -52,13 +66,24 @@ void QRCodeForStream::setServerType(const ServerType servertype)
 
 void QRCodeForStream::LoginOfficial()
 {
+    // 看门狗基准：记录起始时刻，循环中每成功读到一帧就刷新 lastFrameTime。
+    lastFrameTime = std::chrono::steady_clock::now();
     while (m_stop.load())
     {
+        // 无画面看门狗：超过 kStreamStallTimeout 未读到任何一帧，判定直播流已中断。
+        auto now = std::chrono::steady_clock::now();
+        if (lastFrameTime.time_since_epoch().count() != 0 &&
+            now - lastFrameTime > kStreamStallTimeout)
+        {
+            ret = ScanRet::LIVESTOP;
+            break;
+        }
         if (av_read_frame(pAVFormatContext, pAVPacket) < 0)
         {
             ret = ScanRet::LIVESTOP;
             break;
         }
+        lastFrameTime = std::chrono::steady_clock::now();  // 成功读到包，刷新看门狗
         if (pAVPacket->stream_index != videoStreamIndex)
         {
             continue;
@@ -81,53 +106,65 @@ void QRCodeForStream::LoginOfficial()
             cv::imshow("Video_Stream", img);
             cv::waitKey(1);
 #endif
-            threadPool.tryStart([&, img = std::move(img)]() {
-                thread_local QRScanner qrScanners;
-                std::string str;
-                qrScanners.decodeSingle(img, str);
-                if (str.size() < 85)
-                {
-                    return;
-                }
-                std::string_view view(str.c_str() + 79, 3);
-                if (!setGameType.contains(view))
-                {
-                    return;
-                }
-                const std::string_view ticket(str.data() + str.size() - 24, 24);
-                setGameType[view]();
-                if (lastTicket == ticket)
-                {
-                    return;
-                }
-                if (mtx.try_lock())
-                {
-                    if (!m_stop.load())
+            // ── 最新帧 + 节奏限流：根治「逐帧 tryStart 静默丢帧 → 大概率无反应」──
+            // 每解出一帧都刷新 latestFrame（绝不丢弃）；仅在距上次提交 >= kStreamSubmitInterval
+            // 且线程池有空位时，把【当前最新一帧】提交解码。这样二维码帧一定会被扫到，
+            // 又不会因提交过密压垮线程池。
+            latestFrame = std::make_shared<cv::Mat>(std::move(img));
+            auto t = std::chrono::steady_clock::now();
+            if (t - lastSubmitTime >= kStreamSubmitInterval &&
+                threadPool.activeThreadCount() < threadNumber)
+            {
+                lastSubmitTime = t;
+                auto frame = std::move(latestFrame);
+                threadPool.start([this, frame]() {
+                    thread_local QRScanner qrScanners;
+                    std::string str;
+                    qrScanners.decodeSingle(*frame, str);
+                    if (str.size() < 85)
                     {
-                        mtx.unlock();
                         return;
                     }
-                    if (ScanQRLogin(scanUrl.data(), ticket, gameType))
+                    std::string_view view(str.c_str() + 79, 3);
+                    if (!setGameType.contains(view))
                     {
-                        lastTicket = ticket;
-                        nlohmann::json config = nlohmann::json::parse(m_config->getConfig());
-                        if (config["auto_login"])
+                        return;
+                    }
+                    const std::string_view ticket(str.data() + str.size() - 24, 24);
+                    setGameType[view]();
+                    if (lastTicket == ticket)
+                    {
+                        return;
+                    }
+                    if (mtx.try_lock())
+                    {
+                        if (!m_stop.load())
                         {
-                            continueLastLogin();
+                            mtx.unlock();
+                            return;
+                        }
+                        if (ScanQRLogin(scanUrl.data(), ticket, gameType))
+                        {
+                            lastTicket = ticket;
+                            nlohmann::json config = nlohmann::json::parse(m_config->getConfig());
+                            if (config["auto_login"])
+                            {
+                                continueLastLogin();
+                            }
+                            else
+                            {
+                                Q_EMIT loginConfirm(gameType, false);
+                            }
                         }
                         else
                         {
-                            Q_EMIT loginConfirm(gameType, false);
+                            Q_EMIT loginResults(ScanRet::FAILURE_1);
                         }
+                        stop();
+                        mtx.unlock();
                     }
-                    else
-                    {
-                        Q_EMIT loginResults(ScanRet::FAILURE_1);
-                    }
-                    stop();
-                    mtx.unlock();
-                }
-            });
+                });
+            }
         }
         av_frame_unref(pAVFrame);
         av_packet_unref(pAVPacket);
@@ -136,13 +173,24 @@ void QRCodeForStream::LoginOfficial()
 
 void QRCodeForStream::LoginBH3BiliBili()
 {
+    // 看门狗基准：记录起始时刻，循环中每成功读到一帧就刷新 lastFrameTime。
+    lastFrameTime = std::chrono::steady_clock::now();
     while (m_stop.load())
     {
+        // 无画面看门狗：超过 kStreamStallTimeout 未读到任何一帧，判定直播流已中断。
+        auto now = std::chrono::steady_clock::now();
+        if (lastFrameTime.time_since_epoch().count() != 0 &&
+            now - lastFrameTime > kStreamStallTimeout)
+        {
+            ret = ScanRet::LIVESTOP;
+            break;
+        }
         if (av_read_frame(pAVFormatContext, pAVPacket) < 0)
         {
             ret = ScanRet::LIVESTOP;
             break;
         }
+        lastFrameTime = std::chrono::steady_clock::now();  // 成功读到包，刷新看门狗
         if (pAVPacket->stream_index != videoStreamIndex)
         {
             continue;
@@ -166,51 +214,63 @@ void QRCodeForStream::LoginBH3BiliBili()
             cv::imshow("Video_Stream", img);
             cv::waitKey(1);
 #endif
-            threadPool.tryStart([&, img = std::move(img)]() {
-                thread_local QRScanner qrScanners;
-                std::string str;
-                qrScanners.decodeSingle(img, str);
-                if (str.size() < 85)
-                {
-                    return;
-                }
-                if (std::string_view view(str.c_str() + 79, 3); view != "8F3")
-                {
-                    return;
-                }
-                const std::string& ticket = str.substr(str.length() - 24);
-                if (lastTicket == ticket)
-                {
-                    return;
-                }
-                if (mtx.try_lock())
-                {
-                    if (!m_stop.load())
+            // ── 最新帧 + 节奏限流：根治「逐帧 tryStart 静默丢帧 → 大概率无反应」──
+            // 每解出一帧都刷新 latestFrame（绝不丢弃）；仅在距上次提交 >= kStreamSubmitInterval
+            // 且线程池有空位时，把【当前最新一帧】提交解码。这样二维码帧一定会被扫到，
+            // 又不会因提交过密压垮线程池。
+            latestFrame = std::make_shared<cv::Mat>(std::move(img));
+            auto t = std::chrono::steady_clock::now();
+            if (t - lastSubmitTime >= kStreamSubmitInterval &&
+                threadPool.activeThreadCount() < threadNumber)
+            {
+                lastSubmitTime = t;
+                auto frame = std::move(latestFrame);
+                threadPool.start([this, frame]() {
+                    thread_local QRScanner qrScanners;
+                    std::string str;
+                    qrScanners.decodeSingle(*frame, str);
+                    if (str.size() < 85)
                     {
-                        mtx.unlock();
                         return;
                     }
-                    if (ret = scanCheck(ticket); ret == ScanRet::SUCCESS)
+                    if (std::string_view view(str.c_str() + 79, 3); view != "8F3")
                     {
-                        lastTicket = ticket;
-                        nlohmann::json config = nlohmann::json::parse(m_config->getConfig());
-                        if (config["auto_login"])
+                        return;
+                    }
+                    const std::string& ticket = str.substr(str.length() - 24);
+                    if (lastTicket == ticket)
+                    {
+                        return;
+                    }
+                    if (mtx.try_lock())
+                    {
+                        if (!m_stop.load())
                         {
-                            continueLastLogin();
+                            mtx.unlock();
+                            return;
+                        }
+                        if (ret = scanCheck(ticket); ret == ScanRet::SUCCESS)
+                        {
+                            lastTicket = ticket;
+                            nlohmann::json config = nlohmann::json::parse(m_config->getConfig());
+                            if (config["auto_login"])
+                            {
+                                continueLastLogin();
+                            }
+                            else
+                            {
+                                Q_EMIT loginConfirm(GameType::Honkai3_BiliBili, false);
+                            }
                         }
                         else
                         {
-                            Q_EMIT loginConfirm(GameType::Honkai3_BiliBili, false);
+                            Q_EMIT loginResults(ret);
                         }
+                        stop();
+                        mtx.unlock();
                     }
-                    else
-                    {
-                        Q_EMIT loginResults(ret);
-                    }
-                    stop();
-                    mtx.unlock();
-                }
-            });
+                });
+            }
         }
         av_frame_unref(pAVFrame);
         av_packet_unref(pAVPacket);

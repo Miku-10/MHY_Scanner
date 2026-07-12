@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include <atomic>
+#include <chrono>
+#include <memory>
 #include <string_view>
 
 extern "C"
@@ -21,6 +23,9 @@ extern "C"
 #include "ApiDefs.hpp"
 #include "ConfigDate.h"
 #include "ScannerBase.hpp"
+
+// OpenCV 前向声明：头文件仅以 shared_ptr 持有 cv::Mat，避免引入整个 opencv 头文件。
+namespace cv { class Mat; }
 
 class QRCodeForStream final :
     public QThread,
@@ -64,7 +69,11 @@ private:
     int videoStreamIndex{ 0 };
     int videoStreamWidth{};
     int videoStreamHeight{};
-    const int threadNumber{ 2 };
-    QThreadPool threadPool;
+    const int threadNumber{ 3 };   // 解码线程池并发数（原 2，提升吞吐并降低丢帧率）
+    QThreadPool threadPool;         // QR 解码线程池
+    // ── 直播流可靠性增强（根治「逐帧 tryStart 丢帧 → 大概率无反应」）──
+    std::shared_ptr<cv::Mat> latestFrame{ nullptr };          // 最新帧缓存，绝不丢弃
+    std::chrono::steady_clock::time_point lastSubmitTime{};  // 上次提交解码的时刻（节奏限流）
+    std::chrono::steady_clock::time_point lastFrameTime{};   // 上次读到帧的时刻（看门狗）
     std::atomic<bool> m_stop;
 };

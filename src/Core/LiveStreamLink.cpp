@@ -121,15 +121,37 @@ std::string LiveBili::GetStreamUrl(const cpr::Parameters param)
         const auto& data = playInfo["data"];
         const auto& playurl_info = data["playurl_info"];
         const auto& playurl = playurl_info["playurl"];
-        const auto& stream = playurl["stream"][0];
-        const auto& format = stream["format"][0];
-        const auto& codec = format["codec"][0];
-
-        std::string base_url = codec["base_url"].get<std::string>();
-        std::string extra = codec["url_info"][0]["extra"].get<std::string>();
-        std::string host = codec["url_info"][0]["host"].get<std::string>();
-
-        return host + base_url + extra;
+        // 遍历 stream/format/codec 三层结构，挑选第一个拥有有效 base_url + url_info 的流。
+        // 旧版硬编码取 stream[0].format[0].codec[0]，当 B站接口返回结构变化
+        // （如 [0] 为 hevc、或某层缺 url_info）时会取到空地址，表现为
+        // 「拿到响应却打不开流 → 监视直播无反应」。遍历可兼容结构微调。
+        for (const auto& s : playurl["stream"])
+        {
+            for (const auto& f : s["format"])
+            {
+                for (const auto& c : f["codec"])
+                {
+                    if (!c.contains("base_url") || !c.contains("url_info") || c["url_info"].empty())
+                    {
+                        continue;
+                    }
+                    std::string base_url = c["base_url"].get<std::string>();
+                    if (base_url.empty())
+                    {
+                        continue;
+                    }
+                    const auto& info = c["url_info"][0];
+                    if (!info.contains("extra") || !info.contains("host"))
+                    {
+                        continue;
+                    }
+                    std::string extra = info["extra"].get<std::string>();
+                    std::string host = info["host"].get<std::string>();
+                    return host + base_url + extra;
+                }
+            }
+        }
+        return "";
     }
     catch (const nlohmann::json::exception& e)
     {

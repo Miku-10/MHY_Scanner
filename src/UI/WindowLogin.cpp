@@ -523,8 +523,9 @@ void WindowLogin::StartQRCodeLogin()
         QRCodeQImage.fill(255);
         QRCodelabel->setText("二维码加载中");
         AllowDrawQRCode.store(false);
-        const std::string qrcodeString{ GetLoginQrcodeUrl() };
-        ticket = std::string{ qrcodeString.data() + qrcodeString.size() - 24, 24 };
+        const auto qrLogin = GetLoginQrcodeUrl();
+        ticket = qrLogin.ticket;
+        const std::string qrcodeString{ qrLogin.url };
         QrcodeMat = createQrCodeToCvMat(qrcodeString);
         QRCodeQImage = CV_8UC1_MatToQImage(QrcodeMat);
         if (AllowDrawQRCode.load())
@@ -552,7 +553,7 @@ void WindowLogin::CheckQRCodeLoginState()
     break;
     case LoginQRCodeState::Confirmed:
     {
-        auto [code, mid, stoken] = GetStokenByGameToken(uid, game_token);
+        auto [code, mid, stoken] = GetStokenByQRToken(uid, game_token);
         if (code == 0)
         {
             std::string name{ getMysUserName(uid) };

@@ -56,6 +56,7 @@ inline cpr::Header GetRequestHeader()
     static cpr::Header headers{
         { "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) miHoYoBBS/2.76.1" },
         { "Accept", "application/json" },
+        { "Content-Type", "application/json" },
         { "x-rpc-app_id", "bll8iq97cem8" },
         { "x-rpc-app_version", "2.76.1" },
         { "x-rpc-client_type", "2" },
@@ -67,19 +68,26 @@ inline cpr::Header GetRequestHeader()
     return headers;
 }
 
-inline std::string GetLoginQrcodeUrl(const GameType type = loginType)
+struct QRLoginData
 {
-    auto res = cpr::Post(
-        cpr::Url{ api::mhy::hk4e::qrcode_fetch },
+    std::string url;
+    std::string ticket;
+};
+
+// 1.16 新协议：passport createQRLogin 直接返回 url 与 ticket 两个字段
+inline QRLoginData GetLoginQrcodeUrl(const GameType type = loginType)
+{
+    const auto response = cpr::Post(
+        cpr::Url{ api::mhy::passport::create_qr_login },
         cpr::Body{ nlohmann::json{
             { "app_id", static_cast<int>(type) },
             { "device", device_id } }
                        .dump() },
-        cpr::Header{ { "Content-Type", "application/json" } });
+        GetRequestHeader());
 
-    auto data = nlohmann::json::parse(res.text);
-    std::string qrcodeUrl = data["data"]["url"].get<std::string>();
-    return qrcodeUrl;
+    const auto data = nlohmann::json::parse(response.text);
+    return { data["data"]["url"].get<std::string>(),
+             data["data"]["ticket"].get<std::string>() };
 }
 
 inline std::tuple<LoginQRCodeState, std::string, std::string> GetQRCodeState(
@@ -87,13 +95,13 @@ inline std::tuple<LoginQRCodeState, std::string, std::string> GetQRCodeState(
     const GameType type = loginType)
 {
     const auto response = cpr::Post(
-        cpr::Url{ api::mhy::hk4e::qrcode_query },
+        cpr::Url{ api::mhy::passport::query_qr_login_status },
         cpr::Body{ nlohmann::json{
             { "app_id", static_cast<int>(type) },
             { "device", device_id },
             { "ticket", ticket } }
                        .dump() },
-        cpr::Header{ { "Content-Type", "application/json" } });
+        GetRequestHeader());
 
     const auto data = nlohmann::json::parse(response.text);
 
@@ -104,6 +112,8 @@ inline std::tuple<LoginQRCodeState, std::string, std::string> GetQRCodeState(
         { "Init", LoginQRCodeState::Init },
         { "Scanned", LoginQRCodeState::Scanned },
         { "Confirmed", LoginQRCodeState::Confirmed },
+        { "Expired", LoginQRCodeState::Expired },
+        { "Cancelled", LoginQRCodeState::Expired },
     };
 
     const auto stat = data["data"]["stat"].get<std::string>();
@@ -134,14 +144,18 @@ inline std::string getMysUserName(const std::string_view uid)
     return data["data"]["user_info"]["nickname"].get<std::string>();
 }
 
-inline std::tuple<int, std::string, std::string> GetStokenByGameToken(
+// 1.16 新协议：以扫码确认得到的 stoken 换取账号信息（替代废弃的 getTokenByGameToken）
+inline std::tuple<int, std::string, std::string> GetStokenByQRToken(
     const std::string_view uid,
-    const std::string_view game_token)
+    const std::string_view stoken)
 {
+    cpr::Header reqHeaders{ GetRequestHeader() };
+    reqHeaders["Cookie"] = std::format("stoken={};stuid={};mid={};", stoken, uid, uid);
+
     const auto response = cpr::Post(
-        cpr::Url{ api::mhy::takumi::game_token_stoken },
-        cpr::Body{ nlohmann::json{ { "account_id", std::stoi(uid.data()) }, { "game_token", game_token } }.dump() },
-        GetRequestHeader());
+        cpr::Url{ api::mhy::takumi::cookie_account_info_by_stoken },
+        cpr::Body{ nlohmann::json{ { "stoken", stoken }, { "uid", uid } }.dump() },
+        cpr::Header{ reqHeaders });
 
     const auto j = nlohmann::json::parse(response.text);
     const int retcode = j.value("retcode", -1);
@@ -150,8 +164,8 @@ inline std::tuple<int, std::string, std::string> GetStokenByGameToken(
         return { retcode, {}, {} };
 
     return { 0,
-             j["data"]["user_info"]["mid"].get<std::string>(),
-             j["data"]["token"]["token"].get<std::string>() };
+             j["data"]["mid"].get<std::string>(),
+             j["data"]["stoken"].get<std::string>() };
 }
 
 inline std::tuple<int, std::string> GetGameTokenByStoken(

@@ -77,95 +77,103 @@ struct QRLoginData
 // 1.16 新协议：passport createQRLogin 直接返回 url 与 ticket 两个字段
 inline QRLoginData GetLoginQrcodeUrl(const GameType type = loginType)
 {
-    const auto response = cpr::Post(
-        cpr::Url{ api::mhy::passport::create_qr_login },
-        cpr::Body{ nlohmann::json{
-            { "app_id", static_cast<int>(type) },
-            { "device", device_id } }
-                       .dump() },
-        GetRequestHeader());
+    try
+    {
+        const auto response = cpr::Post(
+            cpr::Url{ api::mhy::passport::create_qr_login },
+            cpr::Body{ nlohmann::json{
+                { "app_id", static_cast<int>(type) },
+                { "device", device_id } }
+                           .dump() },
+            GetRequestHeader());
 
-    const auto data = nlohmann::json::parse(response.text);
-    return { data["data"]["url"].get<std::string>(),
-             data["data"]["ticket"].get<std::string>() };
+        const auto data = nlohmann::json::parse(response.text);
+        if (data.value("retcode", -1) != 0)
+            return {};
+        const auto d = data.value("data", nlohmann::json::object_t{});
+        return { d.value("url", ""), d.value("ticket", "") };
+    }
+    catch (...)
+    {
+        return {};
+    }
 }
 
-inline std::tuple<LoginQRCodeState, std::string, std::string> GetQRCodeState(
+// 1.16 新协议：passport web 扫码状态轮询。
+// 返回 (状态, uid, stoken, mid)。
+// 注意：Confirmed 时 data.tokens 恒为空，账号信息在 data.user_info，
+// stoken 由响应头 Set-Cookie 下发（与旧 hk4e qrcode 协议的 payload.raw 不同）。
+inline std::tuple<LoginQRCodeState, std::string, std::string, std::string> GetQRCodeState(
     const std::string_view ticket,
     const GameType type = loginType)
 {
-    const auto response = cpr::Post(
-        cpr::Url{ api::mhy::passport::query_qr_login_status },
-        cpr::Body{ nlohmann::json{
-            { "app_id", static_cast<int>(type) },
-            { "device", device_id },
-            { "ticket", ticket } }
-                       .dump() },
-        GetRequestHeader());
-
-    const auto data = nlohmann::json::parse(response.text);
-
-    if (data.value("retcode", -1) != 0)
-        return { LoginQRCodeState::Expired, {}, {} };
-
-    static const std::unordered_map<std::string, LoginQRCodeState> stateMap{
-        { "Init", LoginQRCodeState::Init },
-        { "Scanned", LoginQRCodeState::Scanned },
-        { "Confirmed", LoginQRCodeState::Confirmed },
-        { "Expired", LoginQRCodeState::Expired },
-        { "Cancelled", LoginQRCodeState::Expired },
-    };
-
-    const auto stat = data["data"]["stat"].get<std::string>();
-    const auto it = stateMap.find(stat);
-
-    if (it == stateMap.end())
-        return { LoginQRCodeState::Expired, {}, {} };
-
-    if (it->second == LoginQRCodeState::Confirmed)
+    try
     {
-        const auto payload = nlohmann::json::parse(
-            data["data"]["payload"]["raw"].get<std::string>());
-        return { LoginQRCodeState::Confirmed,
-                 payload["uid"].get<std::string>(),
-                 payload["token"].get<std::string>() };
-    }
+        const auto response = cpr::Post(
+            cpr::Url{ api::mhy::passport::query_qr_login_status },
+            cpr::Body{ nlohmann::json{
+                { "app_id", static_cast<int>(type) },
+                { "device", device_id },
+                { "ticket", ticket } }
+                           .dump() },
+            GetRequestHeader());
 
-    return { it->second, {}, {} };
+        const auto data = nlohmann::json::parse(response.text);
+        if (data.value("retcode", -1) != 0)
+            return { LoginQRCodeState::Expired, {}, {}, {} };
+
+        const std::string status = data.value("status", "");
+        if (status == "Created")
+            return { LoginQRCodeState::Init, {}, {}, {} };
+        if (status == "Scanned")
+            return { LoginQRCodeState::Scanned, {}, {}, {} };
+        if (status == "Confirmed")
+        {
+            const auto d = data.value("data", nlohmann::json::object_t{});
+            const auto ui = d.value("user_info", nlohmann::json::object_t{});
+            std::string uid = ui.value("aid", "");
+            std::string mid = ui.value("mid", uid);
+
+            // stoken 来自响应头 Set-Cookie（确认登录后下发）
+            std::string stoken;
+            for (const auto& c : response.cookies)
+            {
+                if (c.GetName() == "stoken")
+                {
+                    stoken = c.GetValue();
+                    break;
+                }
+            }
+            if (stoken.empty())
+                stoken = ui.value("stoken", "");
+
+            return { LoginQRCodeState::Confirmed, uid, stoken, mid };
+        }
+        return { LoginQRCodeState::Expired, {}, {}, {} };
+    }
+    catch (...)
+    {
+        return { LoginQRCodeState::Expired, {}, {}, {} };
+    }
 }
 
 inline std::string getMysUserName(const std::string_view uid)
 {
-    static constexpr std::string_view url = api::mhy::mys::userinfo;
-    const auto response = cpr::Get(
-        cpr::Url{ std::format("{}?uid={}", url, uid) });
+    try
+    {
+        static constexpr std::string_view url = api::mhy::mys::userinfo;
+        const auto response = cpr::Get(
+            cpr::Url{ std::format("{}?uid={}", url, uid) });
 
-    const auto data = nlohmann::json::parse(response.text);
-    return data["data"]["user_info"]["nickname"].get<std::string>();
-}
-
-// 1.16 新协议：以扫码确认得到的 stoken 换取账号信息（替代废弃的 getTokenByGameToken）
-inline std::tuple<int, std::string, std::string> GetStokenByQRToken(
-    const std::string_view uid,
-    const std::string_view stoken)
-{
-    cpr::Header reqHeaders{ GetRequestHeader() };
-    reqHeaders["Cookie"] = std::format("stoken={};stuid={};mid={};", stoken, uid, uid);
-
-    const auto response = cpr::Post(
-        cpr::Url{ api::mhy::takumi::cookie_account_info_by_stoken },
-        cpr::Body{ nlohmann::json{ { "stoken", stoken }, { "uid", uid } }.dump() },
-        cpr::Header{ reqHeaders });
-
-    const auto j = nlohmann::json::parse(response.text);
-    const int retcode = j.value("retcode", -1);
-
-    if (retcode != 0)
-        return { retcode, {}, {} };
-
-    return { 0,
-             j["data"]["mid"].get<std::string>(),
-             j["data"]["stoken"].get<std::string>() };
+        const auto data = nlohmann::json::parse(response.text);
+        return data.value("data", nlohmann::json::object_t{})
+                   .value("user_info", nlohmann::json::object_t{})
+                   .value("nickname", std::string{ uid });
+    }
+    catch (...)
+    {
+        return std::string{ uid };
+    }
 }
 
 inline std::tuple<int, std::string> GetGameTokenByStoken(

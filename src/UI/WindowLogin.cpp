@@ -524,6 +524,11 @@ void WindowLogin::StartQRCodeLogin()
         QRCodelabel->setText("二维码加载中");
         AllowDrawQRCode.store(false);
         const auto qrLogin = GetLoginQrcodeUrl();
+        if (qrLogin.url.empty() || qrLogin.ticket.empty())
+        {
+            QRCodelabel->setText("获取二维码失败\n请检查网络后重试");
+            return;
+        }
         ticket = qrLogin.ticket;
         const std::string qrcodeString{ qrLogin.url };
         QrcodeMat = createQrCodeToCvMat(qrcodeString);
@@ -539,7 +544,7 @@ void WindowLogin::StartQRCodeLogin()
 
 void WindowLogin::CheckQRCodeLoginState()
 {
-    auto [state, uid, game_token] = GetQRCodeState(ticket);
+    auto [state, uid, stoken, mid] = GetQRCodeState(ticket);
     switch (state)
     {
     case LoginQRCodeState::Init:
@@ -553,18 +558,15 @@ void WindowLogin::CheckQRCodeLoginState()
     break;
     case LoginQRCodeState::Confirmed:
     {
-        auto [code, mid, stoken] = GetStokenByQRToken(uid, game_token);
-        if (code == 0)
+        if (uid.empty() || stoken.empty())
         {
-            std::string name{ getMysUserName(uid) };
-            emit AddUserInfo(name, stoken, uid, mid, "官服");
-            QRCodelabel->setText("登录成功！");
-            emit QrcodeLoginResult(true);
+            emit showMessagebox("扫码确认后获取账号凭证失败！");
+            return;
         }
-        else
-        {
-            emit showMessagebox("获取STOKEN失败！");
-        }
+        std::string name{ getMysUserName(uid) };
+        emit AddUserInfo(name, stoken, uid, mid.empty() ? uid : mid, "官服");
+        QRCodelabel->setText("登录成功！");
+        emit QrcodeLoginResult(true);
         return;
     }
     break;

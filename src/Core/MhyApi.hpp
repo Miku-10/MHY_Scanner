@@ -90,7 +90,7 @@ inline QRLoginData GetLoginQrcodeUrl(const GameType type = loginType)
         const auto data = nlohmann::json::parse(response.text);
         if (data.value("retcode", -1) != 0)
             return {};
-        const auto d = data.value("data", nlohmann::json::object_t{});
+        const auto d = data.value("data", nlohmann::json::object());
         return { d.value("url", ""), d.value("ticket", "") };
     }
     catch (...)
@@ -129,8 +129,8 @@ inline std::tuple<LoginQRCodeState, std::string, std::string, std::string> GetQR
             return { LoginQRCodeState::Scanned, {}, {}, {} };
         if (status == "Confirmed")
         {
-            const auto d = data.value("data", nlohmann::json::object_t{});
-            const auto ui = d.value("user_info", nlohmann::json::object_t{});
+            const auto d = data.value("data", nlohmann::json::object());
+            const auto ui = d.value("user_info", nlohmann::json::object());
             std::string uid = ui.value("aid", "");
             std::string mid = ui.value("mid", uid);
 
@@ -166,8 +166,8 @@ inline std::string getMysUserName(const std::string_view uid)
             cpr::Url{ std::format("{}?uid={}", url, uid) });
 
         const auto data = nlohmann::json::parse(response.text);
-        return data.value("data", nlohmann::json::object_t{})
-                   .value("user_info", nlohmann::json::object_t{})
+        return data.value("data", nlohmann::json::object())
+                   .value("user_info", nlohmann::json::object())
                    .value("nickname", std::string{ uid });
     }
     catch (...)

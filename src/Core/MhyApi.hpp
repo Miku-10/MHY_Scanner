@@ -122,7 +122,7 @@ inline std::tuple<LoginQRCodeState, std::string, std::string, std::string> GetQR
         if (data.value("retcode", -1) != 0)
             return { LoginQRCodeState::Expired, {}, {}, {} };
 
-        const std::string status = data.value("status", "");
+        const std::string status = data.value("data", nlohmann::json::object()).value("status", "");
         if (status == "Created")
             return { LoginQRCodeState::Init, {}, {}, {} };
         if (status == "Scanned")

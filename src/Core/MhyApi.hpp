@@ -7,8 +7,6 @@
 #include <sstream>
 #include <optional>
 #include <iostream>
-#include <map>
-#include <cctype>
 
 #include <nlohmann/json.hpp>
 #include <cpr/cpr.h>
@@ -76,6 +74,17 @@ struct QRLoginData
     std::string ticket;
 };
 
+// 扫码登录专用请求头：app_id 必须用 dw9y09jqjpxc（对齐 1.16 C++），
+// 这样 Confirmed 时 data.tokens 才会返回 stoken。
+inline cpr::Header GetPassportQRHeader()
+{
+    return cpr::Header{
+        { "Content-Type", "application/json" },
+        { "x-rpc-app_id", "dw9y09jqjpxc" },
+        { "x-rpc-device_id", device_id }
+    };
+}
+
 // 1.16 新协议：passport createQRLogin 直接返回 url 与 ticket 两个字段
 inline QRLoginData GetLoginQrcodeUrl(const GameType type = loginType)
 {
@@ -83,11 +92,8 @@ inline QRLoginData GetLoginQrcodeUrl(const GameType type = loginType)
     {
         const auto response = cpr::Post(
             cpr::Url{ api::mhy::passport::create_qr_login },
-            cpr::Body{ nlohmann::json{
-                { "app_id", static_cast<int>(type) },
-                { "device", device_id } }
-                           .dump() },
-            GetRequestHeader());
+            cpr::Body{ nlohmann::json::object().dump() },
+            GetPassportQRHeader());
 
         const auto data = nlohmann::json::parse(response.text);
         if (data.value("retcode", -1) != 0)
@@ -103,8 +109,8 @@ inline QRLoginData GetLoginQrcodeUrl(const GameType type = loginType)
 
 // 1.16 新协议：passport web 扫码状态轮询。
 // 返回 (状态, uid, stoken, mid)。
-// 注意：Confirmed 时 data.tokens 恒为空，账号信息在 data.user_info，
-// stoken 由响应头 Set-Cookie 下发（与旧 hk4e qrcode 协议的 payload.raw 不同）。
+// 返回 (status, uid, stoken, mid)。Confirmed 时：
+//   stoken = data.tokens[0].token，uid/mid = data.user_info.aid/mid。
 inline std::tuple<LoginQRCodeState, std::string, std::string, std::string> GetQRCodeState(
     const std::string_view ticket,
     const GameType type = loginType)
@@ -113,12 +119,8 @@ inline std::tuple<LoginQRCodeState, std::string, std::string, std::string> GetQR
     {
         const auto response = cpr::Post(
             cpr::Url{ api::mhy::passport::query_qr_login_status },
-            cpr::Body{ nlohmann::json{
-                { "app_id", static_cast<int>(type) },
-                { "device", device_id },
-                { "ticket", ticket } }
-                           .dump() },
-            GetRequestHeader());
+            cpr::Body{ nlohmann::json{ { "ticket", ticket } }.dump() },
+            GetPassportQRHeader());
 
         const auto data = nlohmann::json::parse(response.text);
         if (data.value("retcode", -1) != 0)
@@ -134,76 +136,15 @@ inline std::tuple<LoginQRCodeState, std::string, std::string, std::string> GetQR
             const auto d = data.value("data", nlohmann::json::object());
             const auto ui = d.value("user_info", nlohmann::json::object());
 
-            // 凭证由响应头 Set-Cookie 下发（stoken/stuid/mid 等），data.tokens 恒为空。
-            // cpr 的 response.cookies 依赖 libcurl cookie 罐、可能漏抓；这里直接解析 raw_header 的全部 Set-Cookie。
-            std::map<std::string, std::string> cookies;
-            for (const auto& c : response.cookies)
-            {
-                cookies[c.GetName()] = c.GetValue();
-            }
-            std::istringstream hs(response.raw_header);
-            std::string line;
-            while (std::getline(hs, line))
-            {
-                if (!line.empty() && line.back() == '\r')
-                {
-                    line.pop_back();
-                }
-                std::string lower{ line };
-                for (char& ch : lower)
-                {
-                    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-                }
-                constexpr std::string_view prefix{ "set-cookie:" };
-                if (lower.size() < prefix.size() || lower.compare(0, prefix.size(), prefix) != 0)
-                {
-                    continue;
-                }
-                const std::string cookiePart = line.substr(prefix.size());
-                const std::string::size_type eq = cookiePart.find('=');
-                if (eq == std::string::npos)
-                {
-                    continue;
-                }
-                const std::string::size_type keyStart = cookiePart.find_first_not_of(" \t");
-                if (keyStart == std::string::npos || keyStart > eq)
-                {
-                    continue;
-                }
-                const std::string key = cookiePart.substr(keyStart, eq - keyStart);
-                const std::string::size_type semi = cookiePart.find(';', eq + 1);
-                const std::string value = cookiePart.substr(eq + 1, semi == std::string::npos ? std::string::npos : semi - eq - 1);
-                cookies[key] = value;
-            }
+            std::string uid = ui.value("aid", "");
+            std::string mid = ui.value("mid", uid);
 
-            auto cookieOf = [&cookies](const std::string_view key) -> std::string
+            // stoken 在 data.tokens[0].token（Confirmed 时下发），而非 Set-Cookie。
+            std::string stoken;
+            const auto tokens = d.value("tokens", nlohmann::json::array());
+            if (tokens.is_array() && !tokens.empty())
             {
-                const auto it = cookies.find(std::string{ key });
-                return it != cookies.end() ? it->second : std::string{};
-            };
-
-            std::string stoken = cookieOf("stoken");
-            std::string uid = cookieOf("stuid");
-            if (uid.empty())
-            {
-                uid = cookieOf("account_id");
-            }
-            if (uid.empty())
-            {
-                uid = cookieOf("ltuid");
-            }
-            if (uid.empty())
-            {
-                uid = ui.value("aid", "");
-            }
-            std::string mid = cookieOf("mid");
-            if (mid.empty())
-            {
-                mid = ui.value("mid", uid);
-            }
-            if (mid.empty())
-            {
-                mid = uid;
+                stoken = tokens[0].value("token", "");
             }
 
             return { LoginQRCodeState::Confirmed, uid, stoken, mid };

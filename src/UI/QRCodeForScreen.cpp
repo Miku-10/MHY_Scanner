@@ -33,14 +33,19 @@ QRCodeForScreen::~QRCodeForScreen()
 void QRCodeForScreen::setLoginInfo(const std::string& uid, const std::string& token)
 {
     this->uid = uid;
-    this->gameToken = token;
+    this->stoken = token;
 }
 
 void QRCodeForScreen::setLoginInfo(const std::string& uid, const std::string& token, const std::string& name)
 {
     this->uid = uid;
-    this->gameToken = token;
+    this->stoken = token;
     this->m_name = name;
+}
+
+void QRCodeForScreen::setMid(const std::string& mid)
+{
+    this->mid = mid;
 }
 
 void QRCodeForScreen::LoginOfficial()
@@ -91,7 +96,8 @@ void QRCodeForScreen::LoginOfficial()
                     mtx.unlock();
                     return;
                 }
-                if (ScanQRLogin(scanUrl.data(), ticket, gameType))
+                passportQRUrl = PandaScanQRCode(scanUrl.data(), ticket, gameType);
+                if (!passportQRUrl.empty() && PassportQRLogin(passportQRUrl, stoken, mid, false))
                 {
                     lastTicket = ticket;
                     nlohmann::json config = nlohmann::json::parse(m_config->getConfig());
@@ -198,7 +204,7 @@ void QRCodeForScreen::continueLastLogin()
         using enum ServerType;
     case Official:
     {
-        bool b = ConfirmQRLogin(confirmUrl, uid, gameToken, lastTicket, gameType);
+        bool b = PassportQRLogin(passportQRUrl, stoken, mid, true);
         if (b)
         {
             Q_EMIT loginResults(ScanRet::SUCCESS);
@@ -211,7 +217,7 @@ void QRCodeForScreen::continueLastLogin()
     break;
     case BH3_BiliBili:
     {
-        ret = scanConfirm(lastTicket, uid, gameToken, m_name);
+        ret = scanConfirm(lastTicket, uid, stoken, m_name);
         Q_EMIT loginResults(ret);
     }
     break;

@@ -176,23 +176,22 @@ inline std::string getMysUserName(const std::string_view uid)
     }
 }
 
-inline std::tuple<int, std::string> GetGameTokenByStoken(
+inline bool CheckStokenValid(
     const std::string_view stoken,
     const std::string_view mid)
 {
+    if (stoken.empty() || mid.empty())
+    {
+        return false;
+    }
     const auto response = cpr::Get(
-        cpr::Url{ api::mhy::takumi::game_token },
-        cpr::Parameters{
-            { "stoken", stoken.data() },
-            { "mid", mid.data() } });
+        cpr::Url{ api::mhy::takumi::cookie_account_info_by_stoken },
+        cpr::Header{
+            { "Accept", "application/json" },
+            { "Cookie", std::format("stoken={};mid={};", stoken, mid) } });
 
     const auto j = nlohmann::json::parse(response.text);
-    const int retcode = j.value("retcode", -1);
-
-    if (retcode != 0)
-        return { retcode, {} };
-
-    return { 0, j["data"]["game_token"].get<std::string>() };
+    return j.value("retcode", -1) == 0;
 }
 
 inline std::tuple<int, GeetestData> CreateLoginCaptcha(
@@ -279,32 +278,64 @@ inline auto LoginByMobileCaptcha(const std::string_view actionType, const std::s
     return result;
 }
 
-inline bool ScanQRLogin(const std::string_view url, const std::string_view ticket, GameType gameType)
+inline std::string PandaScanQRCode(const std::string_view scanUrl, const std::string_view ticket, GameType gameType)
 {
     const auto response = cpr::Post(
-        cpr::Url{ url },
+        cpr::Url{ scanUrl },
         cpr::Body{ nlohmann::json{
+            { "passport_app_id", "bll8iq97cem8" },
+            { "ticket", ticket },
             { "app_id", static_cast<int>(gameType) },
             { "device", device_id },
-            { "ticket", ticket } }
+            { "ts", GetUnixTimeStampSeconds() } }
                        .dump() },
-        cpr::Header{ { "Content-Type", "application/json" } });
+        cpr::Header{
+            { "Content-Type", "application/json" },
+            { "x-rpc-app_id", "bll8iq97cem8" },
+            { "x-rpc-device_id", device_id } });
 
     const auto j = nlohmann::json::parse(response.text);
-    return j.value("retcode", -1) == 0;
+    if (j.value("retcode", -1) != 0)
+    {
+        return {};
+    }
+    return j.value("data", nlohmann::json::object()).value("passport_qr_url", "");
 }
 
-inline bool ConfirmQRLogin(const std::string_view url, const std::string_view uid, const std::string_view gameToken, const std::string_view ticket, GameType gameType)
+inline bool PassportQRLogin(const std::string_view passportQRUrl, const std::string_view stoken, const std::string_view mid, const bool confirm)
 {
+    const std::string qrUrl{ passportQRUrl };
+    const auto getParam = [&qrUrl](const std::string_view key, const char terminator) -> std::string
+    {
+        const std::string needle{ std::string{ key } + "=" };
+        const auto b = qrUrl.find(needle);
+        if (b == std::string::npos)
+        {
+            return {};
+        }
+        const auto vb = b + needle.size();
+        const auto ve = qrUrl.find(terminator, vb);
+        return qrUrl.substr(vb, ve == std::string::npos ? std::string::npos : ve - vb);
+    };
+
+    const std::string ticket = getParam("tk", '&');
+    const std::string tokenTypes = getParam("token_types", '#');
+    if (ticket.empty() || tokenTypes.empty())
+    {
+        return false;
+    }
+
     const auto response = cpr::Post(
-        cpr::Url{ url },
+        cpr::Url{ confirm ? std::string_view{ api::mhy::passport::confirm_qr_login } : std::string_view{ api::mhy::passport::scan_qr_login } },
         cpr::Body{ nlohmann::json{
-            { "app_id", static_cast<int>(gameType) },
-            { "device", device_id },
             { "ticket", ticket },
-            { "payload", { { "proto", "Account" }, { "raw", nlohmann::json{ { "uid", uid }, { "token", gameToken } }.dump() } } } }
+            { "token_types", nlohmann::json::array({ tokenTypes }) } }
                        .dump() },
-        cpr::Header{ { "Content-Type", "application/json" } });
+        cpr::Header{
+            { "Content-Type", "application/json" },
+            { "x-rpc-app_id", "bll8iq97cem8" },
+            { "x-rpc-device_id", device_id },
+            { "Cookie", std::format("stoken={};mid={};", stoken, mid) } });
 
     const auto j = nlohmann::json::parse(response.text);
     return j.value("retcode", -1) == 0;

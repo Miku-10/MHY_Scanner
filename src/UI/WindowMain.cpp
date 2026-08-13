@@ -212,14 +212,14 @@ void WindowMain::pBtstartScreen(bool clicked)
             std::string stoken = userinfo["account"][countA]["access_key"];
             std::string uid = userinfo["account"][countA]["uid"];
             std::string mid = userinfo["account"][countA]["mid"];
-            auto [code, game_token] = GetGameTokenByStoken(stoken, mid);
-            if (code != 0)
+            if (!CheckStokenValid(stoken, mid))
             {
                 emit AccountError();
                 return;
             }
             t1.setServerType(ServerType::Official);
-            t1.setLoginInfo(uid, game_token);
+            t1.setLoginInfo(uid, stoken);
+            t1.setMid(mid);
         }
         else if (type == "崩坏3B服")
         {
@@ -275,14 +275,14 @@ void WindowMain::pBtStream(bool clicked)
             std::string stoken = userinfo["account"][countA]["access_key"];
             std::string uid = userinfo["account"][countA]["uid"];
             std::string mid = userinfo["account"][countA]["mid"];
-            auto [code, game_token] = GetGameTokenByStoken(stoken, mid);
-            if (code != 0)
+            if (!CheckStokenValid(stoken, mid))
             {
                 emit AccountError();
                 return;
             }
             t2.setServerType(ServerType::Official);
-            t2.setLoginInfo(uid, game_token);
+            t2.setLoginInfo(uid, stoken);
+            t2.setMid(mid);
         }
         else if (type == "崩坏3B服")
         {

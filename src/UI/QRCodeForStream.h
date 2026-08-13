@@ -37,8 +37,9 @@ public:
     ~QRCodeForStream();
     Q_DISABLE_COPY_MOVE(QRCodeForStream)
 
-    void setLoginInfo(const std::string_view uid, const std::string_view gameToken);
-    void setLoginInfo(const std::string_view uid, const std::string_view gameToken, const std::string& name);
+    void setLoginInfo(const std::string_view uid, const std::string_view stoken);
+    void setLoginInfo(const std::string_view uid, const std::string_view stoken, const std::string& name);
+    void setMid(const std::string& mid);
     void setServerType(const ServerType servertype);
     void setUrl(const std::string& url, const std::map<std::string, std::string> heard = {});
     auto init() -> bool;

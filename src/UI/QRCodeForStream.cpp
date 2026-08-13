@@ -46,17 +46,22 @@ QRCodeForStream::~QRCodeForStream()
     this->wait();
 }
 
-void QRCodeForStream::setLoginInfo(const std::string_view uid, const std::string_view gameToken)
+void QRCodeForStream::setLoginInfo(const std::string_view uid, const std::string_view stoken)
 {
     this->uid = uid;
-    this->gameToken = gameToken;
+    this->stoken = stoken;
 }
 
-void QRCodeForStream::setLoginInfo(const std::string_view uid, const std::string_view gameToken, const std::string& name)
+void QRCodeForStream::setLoginInfo(const std::string_view uid, const std::string_view stoken, const std::string& name)
 {
     this->uid = uid;
-    this->gameToken = gameToken;
+    this->stoken = stoken;
     this->m_name = name;
+}
+
+void QRCodeForStream::setMid(const std::string& mid)
+{
+    this->mid = mid;
 }
 
 void QRCodeForStream::setServerType(const ServerType servertype)
@@ -143,7 +148,8 @@ void QRCodeForStream::LoginOfficial()
                             mtx.unlock();
                             return;
                         }
-                        if (ScanQRLogin(scanUrl.data(), ticket, gameType))
+                        passportQRUrl = PandaScanQRCode(scanUrl.data(), ticket, gameType);
+                        if (!passportQRUrl.empty() && PassportQRLogin(passportQRUrl, stoken, mid, false))
                         {
                             lastTicket = ticket;
                             nlohmann::json config = nlohmann::json::parse(m_config->getConfig());
@@ -370,7 +376,7 @@ void QRCodeForStream::continueLastLogin()
         using enum ServerType;
     case Official:
     {
-        bool b = ConfirmQRLogin(confirmUrl, uid, gameToken, lastTicket, gameType);
+        bool b = PassportQRLogin(passportQRUrl, stoken, mid, true);
         if (b)
         {
             Q_EMIT loginResults(ScanRet::SUCCESS);
@@ -383,7 +389,7 @@ void QRCodeForStream::continueLastLogin()
     break;
     case BH3_BiliBili:
     {
-        ret = scanConfirm(lastTicket, uid, gameToken, m_name);
+        ret = scanConfirm(lastTicket, uid, stoken, m_name);
         Q_EMIT loginResults(ret);
     }
     break;

@@ -7,6 +7,8 @@
 #include <sstream>
 #include <optional>
 #include <iostream>
+#include <map>
+#include <cctype>
 
 #include <nlohmann/json.hpp>
 #include <cpr/cpr.h>
@@ -131,21 +133,78 @@ inline std::tuple<LoginQRCodeState, std::string, std::string, std::string> GetQR
         {
             const auto d = data.value("data", nlohmann::json::object());
             const auto ui = d.value("user_info", nlohmann::json::object());
-            std::string uid = ui.value("aid", "");
-            std::string mid = ui.value("mid", uid);
 
-            // stoken 来自响应头 Set-Cookie（确认登录后下发）
-            std::string stoken;
+            // 凭证由响应头 Set-Cookie 下发（stoken/stuid/mid 等），data.tokens 恒为空。
+            // cpr 的 response.cookies 依赖 libcurl cookie 罐、可能漏抓；这里直接解析 raw_header 的全部 Set-Cookie。
+            std::map<std::string, std::string> cookies;
             for (const auto& c : response.cookies)
             {
-                if (c.GetName() == "stoken")
-                {
-                    stoken = c.GetValue();
-                    break;
-                }
+                cookies[c.GetName()] = c.GetValue();
             }
-            if (stoken.empty())
-                stoken = ui.value("stoken", "");
+            std::istringstream hs(response.raw_header);
+            std::string line;
+            while (std::getline(hs, line))
+            {
+                if (!line.empty() && line.back() == '\r')
+                {
+                    line.pop_back();
+                }
+                std::string lower{ line };
+                for (char& ch : lower)
+                {
+                    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                }
+                constexpr std::string_view prefix{ "set-cookie:" };
+                if (lower.size() < prefix.size() || lower.compare(0, prefix.size(), prefix) != 0)
+                {
+                    continue;
+                }
+                const std::string cookiePart = line.substr(prefix.size());
+                const std::string::size_type eq = cookiePart.find('=');
+                if (eq == std::string::npos)
+                {
+                    continue;
+                }
+                const std::string::size_type keyStart = cookiePart.find_first_not_of(" \t");
+                if (keyStart == std::string::npos || keyStart > eq)
+                {
+                    continue;
+                }
+                const std::string key = cookiePart.substr(keyStart, eq - keyStart);
+                const std::string::size_type semi = cookiePart.find(';', eq + 1);
+                const std::string value = cookiePart.substr(eq + 1, semi == std::string::npos ? std::string::npos : semi - eq - 1);
+                cookies[key] = value;
+            }
+
+            auto cookieOf = [&cookies](const std::string_view key) -> std::string
+            {
+                const auto it = cookies.find(std::string{ key });
+                return it != cookies.end() ? it->second : std::string{};
+            };
+
+            std::string stoken = cookieOf("stoken");
+            std::string uid = cookieOf("stuid");
+            if (uid.empty())
+            {
+                uid = cookieOf("account_id");
+            }
+            if (uid.empty())
+            {
+                uid = cookieOf("ltuid");
+            }
+            if (uid.empty())
+            {
+                uid = ui.value("aid", "");
+            }
+            std::string mid = cookieOf("mid");
+            if (mid.empty())
+            {
+                mid = ui.value("mid", uid);
+            }
+            if (mid.empty())
+            {
+                mid = uid;
+            }
 
             return { LoginQRCodeState::Confirmed, uid, stoken, mid };
         }

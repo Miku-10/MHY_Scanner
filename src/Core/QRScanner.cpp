@@ -30,12 +30,20 @@ void qrLog(const std::string& msg)
 QRScanner::QRScanner()
 {
     const auto modelDir = getModelDir();
-    detector = cv::makePtr<cv::wechat_qrcode::WeChatQRCode>(
-        (modelDir / "detect.prototxt").string(),
-        (modelDir / "detect.caffemodel").string(),
-        (modelDir / "sr.prototxt").string(),
-        (modelDir / "sr.caffemodel").string());
-    detector->setScaleFactor(1.0);
+    try
+    {
+        detector = cv::makePtr<cv::wechat_qrcode::WeChatQRCode>(
+            (modelDir / "detect.prototxt").string(),
+            (modelDir / "detect.caffemodel").string(),
+            (modelDir / "sr.prototxt").string(),
+            (modelDir / "sr.caffemodel").string());
+        detector->setScaleFactor(1.0);
+        qrLog("WeChatQRCode model loaded OK");
+    }
+    catch (const std::exception& e)
+    {
+        qrLog(std::string("WeChatQRCode model load FAILED: ") + e.what());
+    }
 }
 
 QRScanner::~QRScanner()
@@ -44,6 +52,10 @@ QRScanner::~QRScanner()
 
 void QRScanner::decodeSingle(const cv::Mat& img, std::string& qrCode)
 {
+    if (!detector)
+    {
+        return;
+    }
 #ifndef TESTSPEED
     auto startTime = std::chrono::high_resolution_clock::now();
 #endif
@@ -61,6 +73,10 @@ void QRScanner::decodeSingle(const cv::Mat& img, std::string& qrCode)
 
 void QRScanner::decodeMultiple(const cv::Mat& img, std::string& qrCode)
 {
+    if (!detector)
+    {
+        return;
+    }
     const std::vector<std::string>& strDecoded = detector->detectAndDecode(img);
     for (int i = 0; i < strDecoded.size(); i++)
     {

@@ -65,6 +65,7 @@ void QRCodeForScreen::LoginOfficial()
     long mBufferSize = w * h * 4;
     uint8_t* mBuffer = new UCHAR[mBufferSize];
     qrLog("Screen monitor: w=" + std::to_string(w) + " h=" + std::to_string(h));
+    int frameCount = 0;
     while (m_stop.load())
     {
         const int frameResult = screenshotdxgi.getFrame(100);
@@ -82,6 +83,16 @@ void QRCodeForScreen::LoginOfficial()
         screenshotdxgi.copyFrameToBuffer(&mBuffer, mBufferSize);
         cv::Mat img;
         cv::resize(cv::Mat(h, w, CV_8UC4, mBuffer), img, { 1280, 720 });
+        ++frameCount;
+        if (frameCount <= 5)
+        {
+            qrLog("frame captured #" + std::to_string(frameCount));
+        }
+        if (frameCount == 1)
+        {
+            cv::imwrite("MHY_Scanner_frame.png", img);
+            qrLog("saved first frame to MHY_Scanner_frame.png");
+        }
 #ifndef SHOW
         cv::imshow("Video_Stream", img);
         cv::waitKey(1);
@@ -161,6 +172,7 @@ void QRCodeForScreen::LoginBH3BiliBili()
     long mBufferSize = w * h * 4;
     uint8_t* mBuffer = new UCHAR[mBufferSize];
     qrLog("Screen monitor: w=" + std::to_string(w) + " h=" + std::to_string(h));
+    int frameCount = 0;
     while (m_stop.load())
     {
         const int frameResult = screenshotdxgi.getFrame(100);
@@ -178,6 +190,16 @@ void QRCodeForScreen::LoginBH3BiliBili()
         screenshotdxgi.copyFrameToBuffer(&mBuffer, mBufferSize);
         cv::Mat img;
         cv::resize(cv::Mat(h, w, CV_8UC4, mBuffer), img, { 1280, 720 });
+        ++frameCount;
+        if (frameCount <= 5)
+        {
+            qrLog("frame captured #" + std::to_string(frameCount));
+        }
+        if (frameCount == 1)
+        {
+            cv::imwrite("MHY_Scanner_frame.png", img);
+            qrLog("saved first frame to MHY_Scanner_frame.png");
+        }
 #ifndef SHOW
         cv::imshow("Video_Stream", img);
         cv::waitKey(1);

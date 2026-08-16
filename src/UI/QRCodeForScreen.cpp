@@ -56,8 +56,12 @@ void QRCodeForScreen::LoginOfficial()
     ScreenShotDXGI screenshotdxgi;
     int w{ 0 };
     int h{ 0 };
-    screenshotdxgi.InitDevice();
-    screenshotdxgi.InitDupl(0, w, h);
+    if (!screenshotdxgi.InitDevice() || !screenshotdxgi.InitDupl(0, w, h))
+    {
+        ret = ScanRet::STREAMERROR;
+        Q_EMIT loginResults(ret);
+        return;
+    }
     long mBufferSize = w * h * 4;
     uint8_t* mBuffer = new UCHAR[mBufferSize];
     while (m_stop.load())
@@ -132,8 +136,12 @@ void QRCodeForScreen::LoginBH3BiliBili()
     ScreenShotDXGI screenshotdxgi;
     int w{ 0 };
     int h{ 0 };
-    screenshotdxgi.InitDevice();
-    screenshotdxgi.InitDupl(0, w, h);
+    if (!screenshotdxgi.InitDevice() || !screenshotdxgi.InitDupl(0, w, h))
+    {
+        ret = ScanRet::STREAMERROR;
+        Q_EMIT loginResults(ret);
+        return;
+    }
     long mBufferSize = w * h * 4;
     uint8_t* mBuffer = new UCHAR[mBufferSize];
     while (m_stop.load())

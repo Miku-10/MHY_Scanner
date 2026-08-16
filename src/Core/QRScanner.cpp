@@ -1,14 +1,24 @@
 ﻿#include "QRScanner.h"
 
-#define DETECT_PROTOTXT_PATH "./ScanModel/detect.prototxt"
-#define DETECT_CAFFE_MODEL_PATH "./ScanModel/detect.caffemodel"
-#define SR_PROTOTXT_PATH "./ScanModel/sr.prototxt"
-#define SR_CAFFE_MODEL_PATH "./ScanModel/sr.caffemodel"
+#include <windows.h>
+#include <filesystem>
+
+// 模型路径改为相对 exe 所在目录解析，避免工作目录不同导致加载失败（表现为「无反应」）。
+static std::filesystem::path getModelDir()
+{
+    WCHAR exePath[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    return std::filesystem::path(exePath).parent_path() / "ScanModel";
+}
 
 QRScanner::QRScanner()
 {
-    detector = cv::makePtr<cv::wechat_qrcode::WeChatQRCode>(DETECT_PROTOTXT_PATH, DETECT_CAFFE_MODEL_PATH,
-                                                            SR_PROTOTXT_PATH, SR_CAFFE_MODEL_PATH);
+    const auto modelDir = getModelDir();
+    detector = cv::makePtr<cv::wechat_qrcode::WeChatQRCode>(
+        (modelDir / "detect.prototxt").string(),
+        (modelDir / "detect.caffemodel").string(),
+        (modelDir / "sr.prototxt").string(),
+        (modelDir / "sr.caffemodel").string());
     detector->setScaleFactor(0.4);
 }
 

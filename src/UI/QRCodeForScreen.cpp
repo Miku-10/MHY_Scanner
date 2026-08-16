@@ -64,9 +64,21 @@ void QRCodeForScreen::LoginOfficial()
     }
     long mBufferSize = w * h * 4;
     uint8_t* mBuffer = new UCHAR[mBufferSize];
+    qrLog("Screen monitor: w=" + std::to_string(w) + " h=" + std::to_string(h));
     while (m_stop.load())
     {
-        screenshotdxgi.getFrame(100);
+        const int frameResult = screenshotdxgi.getFrame(100);
+        if (frameResult == 1)
+        {
+            ret = ScanRet::STREAMERROR;
+            Q_EMIT loginResults(ret);
+            break;
+        }
+        if (frameResult != 0)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(DELAYED));
+            continue;
+        }
         screenshotdxgi.copyFrameToBuffer(&mBuffer, mBufferSize);
         cv::Mat img;
         cv::resize(cv::Mat(h, w, CV_8UC4, mBuffer), img, { 1280, 720 });
@@ -78,6 +90,10 @@ void QRCodeForScreen::LoginOfficial()
             thread_local QRScanner qrScanners;
             std::string str;
             qrScanners.decodeSingle(img, str);
+            if (!str.empty())
+            {
+                qrLog("decoded: " + str.substr(0, 160));
+            }
             if (str.size() < 85)
             {
                 return;
@@ -144,9 +160,21 @@ void QRCodeForScreen::LoginBH3BiliBili()
     }
     long mBufferSize = w * h * 4;
     uint8_t* mBuffer = new UCHAR[mBufferSize];
+    qrLog("Screen monitor: w=" + std::to_string(w) + " h=" + std::to_string(h));
     while (m_stop.load())
     {
-        screenshotdxgi.getFrame(100);
+        const int frameResult = screenshotdxgi.getFrame(100);
+        if (frameResult == 1)
+        {
+            ret = ScanRet::STREAMERROR;
+            Q_EMIT loginResults(ret);
+            break;
+        }
+        if (frameResult != 0)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(DELAYED));
+            continue;
+        }
         screenshotdxgi.copyFrameToBuffer(&mBuffer, mBufferSize);
         cv::Mat img;
         cv::resize(cv::Mat(h, w, CV_8UC4, mBuffer), img, { 1280, 720 });
@@ -158,6 +186,10 @@ void QRCodeForScreen::LoginBH3BiliBili()
             thread_local QRScanner qrScanners;
             std::string str;
             qrScanners.decodeSingle(img, str);
+            if (!str.empty())
+            {
+                qrLog("decoded: " + str.substr(0, 160));
+            }
             if (str.size() < 85)
             {
                 return;

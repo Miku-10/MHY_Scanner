@@ -2,6 +2,8 @@
 
 #include <windows.h>
 #include <filesystem>
+#include <mutex>
+#include <fstream>
 
 // 模型路径改为相对 exe 所在目录解析，避免工作目录不同导致加载失败（表现为「无反应」）。
 static std::filesystem::path getModelDir()
@@ -9,6 +11,20 @@ static std::filesystem::path getModelDir()
     WCHAR exePath[MAX_PATH]{};
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
     return std::filesystem::path(exePath).parent_path() / "ScanModel";
+}
+
+void qrLog(const std::string& msg)
+{
+    static std::mutex logMtx;
+    std::lock_guard<std::mutex> lock(logMtx);
+    WCHAR exePath[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    const auto logPath = std::filesystem::path(exePath).parent_path() / "MHY_Scanner_debug.log";
+    std::ofstream f(logPath, std::ios::app);
+    if (f.is_open())
+    {
+        f << msg << "\n";
+    }
 }
 
 QRScanner::QRScanner()
@@ -19,7 +35,7 @@ QRScanner::QRScanner()
         (modelDir / "detect.caffemodel").string(),
         (modelDir / "sr.prototxt").string(),
         (modelDir / "sr.caffemodel").string());
-    detector->setScaleFactor(0.4);
+    detector->setScaleFactor(1.0);
 }
 
 QRScanner::~QRScanner()

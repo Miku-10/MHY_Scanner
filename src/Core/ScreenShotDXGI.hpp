@@ -7,6 +7,8 @@
 
 #pragma comment(lib, "d3d11.lib")
 
+void qrLog(const std::string& msg);
+
 class ScreenShotDXGI
 {
 public:
@@ -253,6 +255,7 @@ public:
         {
             D3D11_TEXTURE2D_DESC desc;
             m_AcquiredDesktopImage->GetDesc(&desc);
+            qrLog("staging desc: " + std::to_string(desc.Width) + "x" + std::to_string(desc.Height) + " fmt=" + std::to_string((int)desc.Format));
             // Create CPU access texture m_AcquiredDesktopImage_copy
             D3D11_TEXTURE2D_DESC copyImageDesc{};
             copyImageDesc.Width = desc.Width;
@@ -283,10 +286,18 @@ public:
         hr = context->Map(m_AcquiredDesktopImage_copy, subresource, D3D11_MAP_READ, 0, &mapRes);
         if (FAILED(hr))
         {
-            //LOGE("[0x%08X]: context->Map failed.", hr);
+            qrLog("Map failed hr=" + std::to_string((long)hr));
             return false;
         }
         BYTE* dptr = *buffer;
+        {
+            std::string first;
+            for (int i = 0; i < 8 && i < bufferSize; i++)
+            {
+                first += std::to_string((int)((const BYTE*)mapRes.pData)[i]) + " ";
+            }
+            qrLog("map rowPitch=" + std::to_string((long)mapRes.RowPitch) + " first8=" + first);
+        }
         memcpy_s(dptr, bufferSize, mapRes.pData, bufferSize);
         context->Unmap(m_AcquiredDesktopImage_copy, subresource);
         return true;

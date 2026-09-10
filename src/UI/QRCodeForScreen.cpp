@@ -1,4 +1,4 @@
-﻿#include "QRCodeForScreen.h"
+#include "QRCodeForScreen.h"
 
 #include <chrono>
 #include <thread>
@@ -63,9 +63,10 @@ void QRCodeForScreen::LoginOfficial()
         return;
     }
     long mBufferSize = w * h * 4;
-    uint8_t* mBuffer = new UCHAR[mBufferSize];
+    uint8_t* mBuffer = new UCHAR[mBufferSize]();
     qrLog("Screen monitor: w=" + std::to_string(w) + " h=" + std::to_string(h));
     int frameCount = 0;
+    cv::Mat lastGoodFrame;
     while (m_stop.load())
     {
         const int frameResult = screenshotdxgi.getFrame(100);
@@ -75,28 +76,47 @@ void QRCodeForScreen::LoginOfficial()
             Q_EMIT loginResults(ret);
             break;
         }
-        if (frameResult != 0)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(DELAYED));
-            continue;
-        }
-        screenshotdxgi.copyFrameToBuffer(&mBuffer, mBufferSize);
+
         cv::Mat img;
-        cv::resize(cv::Mat(h, w, CV_8UC4, mBuffer), img, { 1280, 720 });
-        ++frameCount;
-        if (frameCount <= 5)
+        if (frameResult == 0)
         {
-            qrLog("frame captured #" + std::to_string(frameCount));
-        }
-        if (frameCount == 1)
-        {
-            cv::imwrite("MHY_Scanner_frame.png", img);
-            qrLog("saved first frame to MHY_Scanner_frame.png");
-        }
+            if (!screenshotdxgi.copyFrameToBuffer(&mBuffer, mBufferSize))
+            {
+                qrLog("copyFrameToBuffer failed");
+                screenshotdxgi.doneWithFrame();
+                std::this_thread::sleep_for(std::chrono::milliseconds(DELAYED));
+                continue;
+            }
+            cv::resize(cv::Mat(h, w, CV_8UC4, mBuffer), img, { 1280, 720 });
+            lastGoodFrame = img;
+            ++frameCount;
+            if (frameCount <= 5)
+            {
+                qrLog("frame captured #" + std::to_string(frameCount));
+            }
+            if (frameCount == 1)
+            {
+                cv::imwrite("MHY_Scanner_frame.png", img);
+                qrLog("saved first frame to MHY_Scanner_frame.png");
+            }
 #ifndef SHOW
-        cv::imshow("Video_Stream", img);
-        cv::waitKey(1);
+            cv::imshow("Video_Stream", img);
+            cv::waitKey(1);
 #endif
+            screenshotdxgi.doneWithFrame();
+        }
+        else
+        {
+            // DXGI 在画面无变化时超时；静止二维码只会在「刚出现」那一帧变化，
+            // 这里复用上一帧继续解码，避免「码一直摆着却无反应」。
+            if (lastGoodFrame.empty())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(DELAYED));
+                continue;
+            }
+            img = lastGoodFrame.clone();
+        }
+
         threadPool.tryStart([&, img = std::move(img)]() {
             thread_local QRScanner qrScanners;
             std::string str;
@@ -150,7 +170,6 @@ void QRCodeForScreen::LoginOfficial()
             }
         });
         std::this_thread::sleep_for(std::chrono::milliseconds(DELAYED));
-        screenshotdxgi.doneWithFrame();
     }
     delete[] mBuffer;
 }
@@ -170,9 +189,10 @@ void QRCodeForScreen::LoginBH3BiliBili()
         return;
     }
     long mBufferSize = w * h * 4;
-    uint8_t* mBuffer = new UCHAR[mBufferSize];
+    uint8_t* mBuffer = new UCHAR[mBufferSize]();
     qrLog("Screen monitor: w=" + std::to_string(w) + " h=" + std::to_string(h));
     int frameCount = 0;
+    cv::Mat lastGoodFrame;
     while (m_stop.load())
     {
         const int frameResult = screenshotdxgi.getFrame(100);
@@ -182,28 +202,45 @@ void QRCodeForScreen::LoginBH3BiliBili()
             Q_EMIT loginResults(ret);
             break;
         }
-        if (frameResult != 0)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(DELAYED));
-            continue;
-        }
-        screenshotdxgi.copyFrameToBuffer(&mBuffer, mBufferSize);
+
         cv::Mat img;
-        cv::resize(cv::Mat(h, w, CV_8UC4, mBuffer), img, { 1280, 720 });
-        ++frameCount;
-        if (frameCount <= 5)
+        if (frameResult == 0)
         {
-            qrLog("frame captured #" + std::to_string(frameCount));
-        }
-        if (frameCount == 1)
-        {
-            cv::imwrite("MHY_Scanner_frame.png", img);
-            qrLog("saved first frame to MHY_Scanner_frame.png");
-        }
+            if (!screenshotdxgi.copyFrameToBuffer(&mBuffer, mBufferSize))
+            {
+                qrLog("copyFrameToBuffer failed");
+                screenshotdxgi.doneWithFrame();
+                std::this_thread::sleep_for(std::chrono::milliseconds(DELAYED));
+                continue;
+            }
+            cv::resize(cv::Mat(h, w, CV_8UC4, mBuffer), img, { 1280, 720 });
+            lastGoodFrame = img;
+            ++frameCount;
+            if (frameCount <= 5)
+            {
+                qrLog("frame captured #" + std::to_string(frameCount));
+            }
+            if (frameCount == 1)
+            {
+                cv::imwrite("MHY_Scanner_frame.png", img);
+                qrLog("saved first frame to MHY_Scanner_frame.png");
+            }
 #ifndef SHOW
-        cv::imshow("Video_Stream", img);
-        cv::waitKey(1);
+            cv::imshow("Video_Stream", img);
+            cv::waitKey(1);
 #endif
+            screenshotdxgi.doneWithFrame();
+        }
+        else
+        {
+            if (lastGoodFrame.empty())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(DELAYED));
+                continue;
+            }
+            img = lastGoodFrame.clone();
+        }
+
         threadPool.tryStart([&, img = std::move(img)]() {
             thread_local QRScanner qrScanners;
             std::string str;
@@ -254,7 +291,6 @@ void QRCodeForScreen::LoginBH3BiliBili()
             }
         });
         std::this_thread::sleep_for(std::chrono::milliseconds(DELAYED));
-        screenshotdxgi.doneWithFrame();
     }
     delete[] mBuffer;
 }

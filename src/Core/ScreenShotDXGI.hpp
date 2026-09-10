@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <iostream>
 
@@ -17,7 +17,10 @@ public:
         m_DeskDupl(nullptr),
         m_AcquiredDesktopImage(nullptr),
         m_AcquiredDesktopImage_copy(nullptr),
-        m_monitorIdx(0)
+        m_monitorIdx(0),
+        m_stagingWidth(0),
+        m_stagingHeight(0),
+        selectedAdapter(nullptr)
     {
     }
     ~ScreenShotDXGI()
@@ -43,6 +46,12 @@ public:
         {
             m_Device->Release();
             m_Device = nullptr;
+        }
+
+        if (selectedAdapter)
+        {
+            selectedAdapter->Release();
+            selectedAdapter = nullptr;
         }
     }
     /*
@@ -247,9 +256,18 @@ public:
 
     bool copyFrameToBuffer(BYTE** buffer, long bufferSize)
     {
+        if (!m_AcquiredDesktopImage || !buffer || !*buffer)
+        {
+            return false;
+        }
+
         HRESULT hr;
-        ID3D11DeviceContext* context;
+        ID3D11DeviceContext* context = nullptr;
         m_Device->GetImmediateContext(&context);
+        if (!context)
+        {
+            return false;
+        }
 
         if (!m_AcquiredDesktopImage_copy)
         {
@@ -267,39 +285,65 @@ public:
             copyImageDesc.SampleDesc.Count = 1;
             copyImageDesc.SampleDesc.Quality = 0;
             copyImageDesc.MipLevels = 1;
-            copyImageDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
+            // Staging 纹理的 CPUAccessFlags 只能是 READ 或 WRITE 之一。
+            // 同时置 READ|WRITE 会让 CreateTexture2D 直接失败，调用方若忽略返回值，
+            // 大块分配的零页缓冲区会被当成「画面」写出全透明 PNG。
+            copyImageDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
             copyImageDesc.Usage = D3D11_USAGE_STAGING;
             hr = m_Device->CreateTexture2D(&copyImageDesc, NULL, &m_AcquiredDesktopImage_copy);
 
-            if (FAILED(hr))
+            if (FAILED(hr) || !m_AcquiredDesktopImage_copy)
             {
-                //LOGE("[0x%08X]: CreateTexture2D failed.", hr);
+                qrLog("CreateTexture2D failed hr=" + std::to_string((long)hr));
+                context->Release();
                 return false;
             }
+            m_stagingWidth = desc.Width;
+            m_stagingHeight = desc.Height;
         }
 
         context->CopyResource(m_AcquiredDesktopImage_copy, m_AcquiredDesktopImage); //源Texture2D和目的Texture2D需要有相同的多重采样计数和质量时
 
-        D3D11_MAPPED_SUBRESOURCE mapRes;
+        D3D11_MAPPED_SUBRESOURCE mapRes{};
         UINT subresource = D3D11CalcSubresource(0, 0, 0);
 
         hr = context->Map(m_AcquiredDesktopImage_copy, subresource, D3D11_MAP_READ, 0, &mapRes);
         if (FAILED(hr))
         {
             qrLog("Map failed hr=" + std::to_string((long)hr));
+            context->Release();
             return false;
         }
-        BYTE* dptr = *buffer;
         {
             std::string first;
-            for (int i = 0; i < 8 && i < bufferSize; i++)
+            for (int i = 0; i < 8; i++)
             {
                 first += std::to_string((int)((const BYTE*)mapRes.pData)[i]) + " ";
             }
             qrLog("map rowPitch=" + std::to_string((long)mapRes.RowPitch) + " first8=" + first);
         }
-        memcpy_s(dptr, bufferSize, mapRes.pData, bufferSize);
+
+        // RowPitch 通常大于 width*4（行对齐填充），必须按行拷贝。
+        BYTE* dptr = *buffer;
+        const UINT rowBytes = m_stagingWidth * 4;
+        const size_t required = static_cast<size_t>(rowBytes) * m_stagingHeight;
+        if (mapRes.RowPitch < rowBytes || static_cast<size_t>(bufferSize) < required)
+        {
+            qrLog("copy size mismatch rowPitch=" + std::to_string((long)mapRes.RowPitch) +
+                  " rowBytes=" + std::to_string(rowBytes) +
+                  " bufferSize=" + std::to_string(bufferSize));
+            context->Unmap(m_AcquiredDesktopImage_copy, subresource);
+            context->Release();
+            return false;
+        }
+        const BYTE* sptr = static_cast<const BYTE*>(mapRes.pData);
+        for (UINT y = 0; y < m_stagingHeight; ++y)
+        {
+            memcpy_s(dptr + static_cast<size_t>(y) * rowBytes, rowBytes,
+                     sptr + static_cast<size_t>(y) * mapRes.RowPitch, rowBytes);
+        }
         context->Unmap(m_AcquiredDesktopImage_copy, subresource);
+        context->Release();
         return true;
     }
 
@@ -323,6 +367,12 @@ public:
 private:
     void ChooseAdapter()
     {
+        if (selectedAdapter)
+        {
+            selectedAdapter->Release();
+            selectedAdapter = nullptr;
+        }
+
         IDXGIFactory1* dxgiFactory{ nullptr };
         HRESULT hr{ CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&dxgiFactory) };
 
@@ -330,18 +380,55 @@ private:
         {
             return;
         }
-        for (UINT i = 0; dxgiFactory->EnumAdapters1(i, &selectedAdapter) != DXGI_ERROR_NOT_FOUND; ++i)
+
+        // 优先选「真正挂着显示器输出」的硬件适配器；多显卡/核显+独显机器上
+        // 第一个非软件适配器可能并不驱动当前屏幕，复制出来会是空帧。
+        IDXGIAdapter1* fallback = nullptr;
+        for (UINT i = 0;; ++i)
         {
-            DXGI_ADAPTER_DESC1 desc;
-            hr = selectedAdapter->GetDesc1(&desc);
-            char narrowString[100];
-            WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, narrowString, sizeof(narrowString), NULL, NULL);
-            //trrlog::Log_debug("{}", narrowString);
-            if (desc.Flags != DXGI_ADAPTER_FLAG_SOFTWARE)
+            IDXGIAdapter1* adapter = nullptr;
+            if (dxgiFactory->EnumAdapters1(i, &adapter) == DXGI_ERROR_NOT_FOUND)
             {
-                //trrlog::Log_debug("used display adapter{}", narrowString);
                 break;
             }
+
+            DXGI_ADAPTER_DESC1 desc{};
+            adapter->GetDesc1(&desc);
+            if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
+            {
+                adapter->Release();
+                continue;
+            }
+
+            IDXGIOutput* output = nullptr;
+            const bool hasOutput = SUCCEEDED(adapter->EnumOutputs(0, &output));
+            if (output)
+            {
+                output->Release();
+            }
+            if (hasOutput)
+            {
+                selectedAdapter = adapter;
+                break;
+            }
+            if (!fallback)
+            {
+                fallback = adapter;
+            }
+            else
+            {
+                adapter->Release();
+            }
+        }
+
+        if (!selectedAdapter)
+        {
+            selectedAdapter = fallback;
+            fallback = nullptr;
+        }
+        if (fallback)
+        {
+            fallback->Release();
         }
         dxgiFactory->Release();
     }
@@ -354,6 +441,8 @@ private:
     UINT m_monitorIdx;
     ID3D11Texture2D* m_AcquiredDesktopImage;
     ID3D11Texture2D* m_AcquiredDesktopImage_copy;
+    UINT m_stagingWidth;
+    UINT m_stagingHeight;
 
     IDXGIAdapter1* selectedAdapter;
 };

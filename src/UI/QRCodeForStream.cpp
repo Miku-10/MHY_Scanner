@@ -1,3 +1,11 @@
+/**
+ * @file QRCodeForStream.cpp
+ * @brief 直播间监视扫码：FFmpeg 拉流解码，节流提交 WeChatQRCode，走 passport 登录链路。
+ *
+ * init 失败必须 emit STREAMERROR，否则界面会显示「监视中」但实际未扫码。
+ * 解码采用「最新帧 + 200ms 节奏」避免线程池被慢速 DNN 占满导致静默丢帧。
+ */
+
 #include "QRCodeForStream.h"
 
 #include <chrono>

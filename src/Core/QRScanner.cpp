@@ -1,4 +1,12 @@
-﻿#include "QRScanner.h"
+/**
+ * @file QRScanner.cpp
+ * @brief OpenCV WeChatQRCode 封装：模型加载、单帧/多码解码与调试日志。
+ *
+ * 模型路径相对 exe 目录解析，避免因工作目录不同导致加载失败。
+ * qrLog 写入 exe 同目录 MHY_Scanner_debug.log，便于线上问题定位。
+ */
+
+#include "QRScanner.h"
 
 #include <windows.h>
 #include <filesystem>
@@ -13,6 +21,9 @@ static std::filesystem::path getModelDir()
     return std::filesystem::path(exePath).parent_path() / "ScanModel";
 }
 
+/**
+ * @brief 追加一行调试日志到 exe 目录下的 MHY_Scanner_debug.log。
+ */
 void qrLog(const std::string& msg)
 {
     static std::mutex logMtx;
@@ -27,6 +38,9 @@ void qrLog(const std::string& msg)
     }
 }
 
+/**
+ * @brief 构造解码器并加载 WeChatQRCode 四件套模型。
+ */
 QRScanner::QRScanner()
 {
     const auto modelDir = getModelDir();
@@ -50,6 +64,11 @@ QRScanner::~QRScanner()
 {
 }
 
+/**
+ * @brief 解码单帧图像中的第一个二维码。
+ * @param img 输入图像（BGR/BGRA 均可，内部会转灰度）。
+ * @param qrCode 输出：解码结果，失败时保持空。
+ */
 void QRScanner::decodeSingle(const cv::Mat& img, std::string& qrCode)
 {
     if (!detector)
@@ -71,6 +90,9 @@ void QRScanner::decodeSingle(const cv::Mat& img, std::string& qrCode)
 #endif
 }
 
+/**
+ * @brief 解码图像中的多个二维码，结果写入 qrCode（保留最后一个）。
+ */
 void QRScanner::decodeMultiple(const cv::Mat& img, std::string& qrCode)
 {
     if (!detector)

@@ -1,3 +1,11 @@
+/**
+ * @file QRCodeForScreen.cpp
+ * @brief 屏幕监视扫码：DXGI 采集桌面帧，WeChatQRCode 解码后走 passport 登录链路。
+ *
+ * DXGI 在画面无变化时会超时，静止二维码需要复用上一帧继续解码。
+ * 采集失败必须写日志并跳过，避免把全 0 缓冲区当作画面。
+ */
+
 #include "QRCodeForScreen.h"
 
 #include <chrono>

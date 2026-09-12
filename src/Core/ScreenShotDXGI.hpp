@@ -1,3 +1,11 @@
+/**
+ * @file ScreenShotDXGI.hpp
+ * @brief DXGI Desktop Duplication 屏幕采集：设备初始化、取帧与 CPU 可读拷贝。
+ *
+ * 注意：staging 纹理 CPUAccessFlags 只能是 READ 或 WRITE 之一；
+ * 拷贝时必须按 RowPitch 逐行 memcpy，不能整块线性拷贝。
+ */
+
 #pragma once
 
 #include <iostream>
@@ -14,6 +22,7 @@ class ScreenShotDXGI
 public:
     ScreenShotDXGI() :
         m_Device(nullptr),
+        m_Context(nullptr),
         m_DeskDupl(nullptr),
         m_AcquiredDesktopImage(nullptr),
         m_AcquiredDesktopImage_copy(nullptr),
@@ -40,6 +49,12 @@ public:
         {
             m_DeskDupl->Release();
             m_DeskDupl = nullptr;
+        }
+
+        if (m_Context)
+        {
+            m_Context->Release();
+            m_Context = nullptr;
         }
 
         if (m_Device)
@@ -95,10 +110,10 @@ public:
             nullptr);
         if (SUCCEEDED(hr))
         {
-            //trrlog::Log_debug("InitDevice success");
+            // 缓存 ImmediateContext，避免每帧 GetImmediateContext 增减引用计数
+            m_Device->GetImmediateContext(&m_Context);
             return true;
         }
-        //trrlog::Log_debug("InitDevice error");
         return false;
     }
 
@@ -262,8 +277,7 @@ public:
         }
 
         HRESULT hr;
-        ID3D11DeviceContext* context = nullptr;
-        m_Device->GetImmediateContext(&context);
+        ID3D11DeviceContext* context = m_Context;
         if (!context)
         {
             return false;
@@ -295,7 +309,6 @@ public:
             if (FAILED(hr) || !m_AcquiredDesktopImage_copy)
             {
                 qrLog("CreateTexture2D failed hr=" + std::to_string((long)hr));
-                context->Release();
                 return false;
             }
             m_stagingWidth = desc.Width;
@@ -311,7 +324,6 @@ public:
         if (FAILED(hr))
         {
             qrLog("Map failed hr=" + std::to_string((long)hr));
-            context->Release();
             return false;
         }
         {
@@ -333,7 +345,6 @@ public:
                   " rowBytes=" + std::to_string(rowBytes) +
                   " bufferSize=" + std::to_string(bufferSize));
             context->Unmap(m_AcquiredDesktopImage_copy, subresource);
-            context->Release();
             return false;
         }
         const BYTE* sptr = static_cast<const BYTE*>(mapRes.pData);
@@ -343,7 +354,6 @@ public:
                      sptr + static_cast<size_t>(y) * mapRes.RowPitch, rowBytes);
         }
         context->Unmap(m_AcquiredDesktopImage_copy, subresource);
-        context->Release();
         return true;
     }
 
@@ -435,6 +445,7 @@ private:
 
 private:
     ID3D11Device* m_Device;
+    ID3D11DeviceContext* m_Context;
     IDXGIOutputDuplication* m_DeskDupl;
     bool m_DeskDupl_state = false;
 

@@ -1,4 +1,4 @@
-﻿#include "WindowMain.h"
+#include "WindowMain.h"
 
 #include <fstream>
 #include <filesystem>
@@ -11,6 +11,9 @@
 
 #include "MhyApi.hpp"
 #include "BSGameSDK.hpp"
+
+// 主窗口：账号列表、监视启停、配置项与扫码结果反馈。
+// 负责把 UI 操作接到屏幕/直播两条扫码线程（t1/t2），协议实现在 Core 层。
 
 WindowMain::WindowMain(QWidget* parent) :
     QMainWindow(parent),
@@ -82,18 +85,9 @@ WindowMain::WindowMain(QWidget* parent) :
     ui.tableWidget->setColumnWidth(3, 100);
     ui.tableWidget->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
     ui.tableWidget->verticalHeader()->setVisible(false);
-    ui.tableWidget->horizontalHeader()->setFont(QFont("楷体", 11));
+    ui.tableWidget->horizontalHeader()->setFont(QFont("微软雅黑", 10, QFont::DemiBold));
     ui.tableWidget->setAlternatingRowColors(true);
 
-    ui.tableWidget->horizontalHeader()->setStyleSheet(
-        "QHeaderView::section {"
-        "padding: 1px;"
-        "border: none;"
-        "border-bottom: 1px solid rgb(75, 120, 154);"
-        "border-right: 1px solid rgb(75, 120, 154);"
-        "background-color:#e2e6e7;"
-        "color:#333333;"
-        "}");
     ui.label_3->setText(MHY_Scanner_VERSION);
 
     ui.tableWidget->setSelectionBehavior(QAbstractItemView::SelectRows);

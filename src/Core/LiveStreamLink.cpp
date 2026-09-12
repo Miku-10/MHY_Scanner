@@ -1,3 +1,10 @@
+/**
+ * @file LiveStreamLink.cpp
+ * @brief 直播平台拉流地址解析（B站 / 抖音）。
+ *
+ * B站优先返回 avc(H.264) 流，兼容性最好；抖音从 pull_datas / live_core_sdk_data 取 FLV。
+ */
+
 #include "LiveStreamLink.h"
 
 #include <format>

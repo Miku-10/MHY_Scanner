@@ -1,6 +1,6 @@
 /**
  * @file WindowAbout.cpp
- * @brief 「关于」对话框：展示版本与 Qt 版本信息。
+ * @brief 「关于」对话框：深色主题下展示版本信息。
  */
 
 #include "WindowAbout.h"
@@ -9,22 +9,22 @@ WindowAbout::WindowAbout(QWidget* parent) :
     QDialog(parent)
 {
     setWindowTitle("关于 MHY_Scanner");
-    setFixedSize(420, 220);
+    setFixedSize(420, 240);
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(24, 24, 24, 24);
-    layout->setSpacing(12);
+    layout->setContentsMargins(28, 28, 28, 28);
+    layout->setSpacing(14);
 
-    auto* title = new QLabel(QStringLiteral("MHY_Scanner"), this);
-    title->setStyleSheet("font-size: 20px; font-weight: 700; color: #1E293B;");
+    auto* title = new QLabel(QStringLiteral("MHY 扫码器"), this);
+    title->setStyleSheet("font-size: 22px; font-weight: 700; color: #F2F7FB; letter-spacing: 1px;");
     title->setAlignment(Qt::AlignCenter);
 
     auto* body = new QLabel(
-        QStringLiteral("版本 %1\nQt Version: %2\n\n米哈游游戏登录二维码辅助工具")
+        QStringLiteral("版本 %1\nQt %2\n\n从屏幕或直播间识别米哈游游戏登录二维码")
             .arg(QStringLiteral(MHY_Scanner_VERSION))
             .arg(QStringLiteral(QT_VERSION_STR)),
         this);
-    body->setStyleSheet("font-size: 13px; color: #475569;");
+    body->setStyleSheet("font-size: 13px; color: #8FA3B8; line-height: 1.5;");
     body->setAlignment(Qt::AlignCenter);
     body->setWordWrap(true);
 

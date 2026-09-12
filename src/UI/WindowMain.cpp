@@ -20,7 +20,9 @@ WindowMain::WindowMain(QWidget* parent) :
     t1(this),
     t2(this)
 {
-    QApplication::setFont(QFont("微软雅黑", 9));
+    QFont appFont(QStringLiteral("Segoe UI"), 9);
+    appFont.setStyleHint(QFont::SansSerif);
+    QApplication::setFont(appFont);
     ui.setupUi(this);
     connect(ui.action1_3, &QAction::triggered, this, &WindowMain::AddAccount);
     connect(ui.action1_4, &QAction::triggered, this, &WindowMain::SetDefaultAccount);
@@ -40,6 +42,8 @@ WindowMain::WindowMain(QWidget* parent) :
     connect(this, &WindowMain::StartScanScreen, this, [&]() {
         ui.pBtstartScreen->setText("监视屏幕中");
         ui.pBtstartScreen->setEnabled(true);
+        ui.labelStatus->setText(QStringLiteral("屏幕监视中"));
+        ui.labelStatusDot->setStyleSheet("color: #F59E0B;");
     });
     connect(this, &WindowMain::AccountError, this, [&]() {
         failure();
@@ -48,6 +52,8 @@ WindowMain::WindowMain(QWidget* parent) :
     connect(this, &WindowMain::StartScanLive, this, [&]() {
         ui.pBtStream->setText("监视直播中");
         ui.pBtStream->setEnabled(true);
+        ui.labelStatus->setText(QStringLiteral("直播监视中"));
+        ui.labelStatusDot->setStyleSheet("color: #F59E0B;");
     });
     connect(this, &WindowMain::LiveStreamLinkError, this, [&](LiveStreamStatus status) {
         liveIdError(status);
@@ -79,16 +85,17 @@ WindowMain::WindowMain(QWidget* parent) :
            << "备注";
     ui.tableWidget->setHorizontalHeaderLabels(header);
     ui.tableWidget->horizontalHeader()->setSectionResizeMode(QHeaderView::Fixed);
-    ui.tableWidget->setColumnWidth(0, 35);
-    ui.tableWidget->setColumnWidth(1, 100);
-    ui.tableWidget->setColumnWidth(2, 100);
+    ui.tableWidget->setColumnWidth(0, 48);
+    ui.tableWidget->setColumnWidth(1, 140);
+    ui.tableWidget->setColumnWidth(2, 160);
     ui.tableWidget->setColumnWidth(3, 100);
     ui.tableWidget->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
     ui.tableWidget->verticalHeader()->setVisible(false);
-    ui.tableWidget->horizontalHeader()->setFont(QFont("微软雅黑", 10, QFont::DemiBold));
+    ui.tableWidget->verticalHeader()->setDefaultSectionSize(36);
     ui.tableWidget->setAlternatingRowColors(true);
 
-    ui.label_3->setText(MHY_Scanner_VERSION);
+    ui.label_3->setText(QStringLiteral("v") + QStringLiteral(MHY_Scanner_VERSION));
+    ui.labelStatus->setText(QStringLiteral("就绪"));
 
     ui.tableWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui.tableWidget->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -96,6 +103,8 @@ WindowMain::WindowMain(QWidget* parent) :
 
     ui.lineEditLiveId->setValidator(new QRegularExpressionValidator(QRegularExpression("[0-9]+$"), this));
     ui.lineEditLiveId->setClearButtonEnabled(true);
+    // 默认 B 站（combo 索引 1），与主要使用场景一致；索引顺序必须保持 抖音=0 / BiliBili=1
+    ui.comboBox->setCurrentIndex(1);
 
     ui.tableWidget->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(ui.tableWidget, &QTableWidget::customContextMenuRequested, this, &WindowMain::onTableRightClicked);
@@ -611,6 +620,8 @@ void WindowMain::pBtStop()
     ui.pBtStream->setChecked(false);
     ui.pBtstartScreen->setEnabled(true);
     ui.pBtStream->setEnabled(true);
+    ui.labelStatus->setText(QStringLiteral("就绪"));
+    ui.labelStatusDot->setStyleSheet("color: #2DD4BF;");
 }
 
 void WindowMain::configInitUpdate()

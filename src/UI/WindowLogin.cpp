@@ -1,4 +1,4 @@
-﻿#include "WindowLogin.h"
+#include "WindowLogin.h"
 
 #include <thread>
 #include <ranges>
@@ -12,6 +12,7 @@
 #include "BSGameSDK.hpp"
 #include "UtilMat.hpp"
 #include "CookieParser.hpp"
+#include "UiDialog.hpp"
 
 WindowLogin::WindowLogin(QWidget* parent) :
     QWidget(parent),
@@ -241,7 +242,7 @@ void WindowLogin::InitTabs3()
 void WindowLogin::Initconnect()
 {
     connect(this, &WindowLogin::showMessagebox, this, [this](const QString& Message) {
-        QMessageBox::information(this, "提示", Message, QMessageBox::Yes);
+        UiDialog::info(this, QStringLiteral("提示"), Message);
     });
 
     connect(this, &WindowLogin::showWindowGeeTest, this, [this](const bool show) {

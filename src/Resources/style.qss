@@ -430,13 +430,35 @@ QScrollBar::sub-line:horizontal {
     width: 0;
 }
 
-/* ── 弹窗 ── */
-QMessageBox {
+/* ── 弹窗 / 对话框 ── */
+QMessageBox, QDialog {
     background: #FFFFFF;
 }
 
-QMessageBox QLabel {
+QMessageBox QLabel,
+QDialog QLabel {
     color: #1F2937;
+    font-size: 13px;
+    background: transparent;
+}
+
+QMessageBox QLabel#qt_msgbox_label {
+    color: #1F2937;
+    font-size: 13px;
+    min-width: 220px;
+}
+
+QMessageBox QPushButton,
+QDialog QPushButton {
+    min-width: 88px;
+    min-height: 32px;
+    padding: 6px 16px;
+    border-radius: 8px;
+}
+
+QDialogButtonBox {
+    background: transparent;
+    border: none;
 }
 
 QToolTip {

@@ -621,7 +621,7 @@ void WindowMain::pBtStop()
     ui.pBtstartScreen->setEnabled(true);
     ui.pBtStream->setEnabled(true);
     ui.labelStatus->setText(QStringLiteral("就绪"));
-    ui.labelStatusDot->setStyleSheet("color: #2DD4BF;");
+    ui.labelStatusDot->setStyleSheet("color: #0D9488;");
 }
 
 void WindowMain::configInitUpdate()

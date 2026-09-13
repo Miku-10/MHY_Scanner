@@ -1,6 +1,6 @@
 /**
  * @file WindowAbout.cpp
- * @brief 「关于」对话框：深色主题下展示版本信息。
+ * @brief 「关于」对话框：浅色主题下展示版本信息。
  */
 
 #include "WindowAbout.h"
@@ -16,7 +16,7 @@ WindowAbout::WindowAbout(QWidget* parent) :
     layout->setSpacing(14);
 
     auto* title = new QLabel(QStringLiteral("MHY 扫码器"), this);
-    title->setStyleSheet("font-size: 22px; font-weight: 700; color: #F2F7FB; letter-spacing: 1px;");
+    title->setStyleSheet("font-size: 22px; font-weight: 700; color: #0F172A; letter-spacing: 1px;");
     title->setAlignment(Qt::AlignCenter);
 
     auto* body = new QLabel(
@@ -24,7 +24,7 @@ WindowAbout::WindowAbout(QWidget* parent) :
             .arg(QStringLiteral(MHY_Scanner_VERSION))
             .arg(QStringLiteral(QT_VERSION_STR)),
         this);
-    body->setStyleSheet("font-size: 13px; color: #8FA3B8; line-height: 1.5;");
+    body->setStyleSheet("font-size: 13px; color: #64748B;");
     body->setAlignment(Qt::AlignCenter);
     body->setWordWrap(true);
 

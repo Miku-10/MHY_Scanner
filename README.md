@@ -5,7 +5,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/Theresa-0328/MHY_Scanner?color=blue&style=for-the-badge)](https://github.com/Theresa-0328/MHY_Scanner/stargazers)
 </div>
 
-### **版本 - v1.1.15**
+### **版本 - v1.20.0**
 
 ## 说明
 本项目为免费开源项目，用于学习和研究，禁止商业化用途。
@@ -15,7 +15,7 @@
 - 从直播流获取二维码登录，适用于抢码登录情景。
 - 可选启动后自动开始识别屏幕和识别完成后自动退出，无需登录后手动切窗口关闭。
 - 表格化管理多账号，方便切换游戏账号。
- 
+
 ## 目前可用的平台
 |   崩坏3    | 原神  | 星穹铁道 | 绝区零 |
 | :--------: | :---: | :------:| :----: |
@@ -48,6 +48,25 @@
 
 目前没有进行大量测试，如果有任何建议和问题欢迎提Issues。
 
+## v1.20.0 更新说明
+相对早期版本，本分支在尽量不改动核心扫码协议的前提下，做了以下修复与体验优化，欢迎审阅与反馈：
+
+### 功能修复
+- **屏幕监视**：修复 DXGI staging 纹理参数非法导致「能采到帧但画面全透明、二维码无反应」的问题；按 `RowPitch` 逐行拷贝，适配多显卡输出选择。
+- **直播间监视**：修复拉流初始化失败后界面仍显示「监视中」的静默问题；增大 `probesize`、优先选取 avc 流，并补充 B 站 Referer/UA。
+- **账号登录**：扫码登录与 stoken 校验链路按现行 passport 接口对齐，修复「监视前提示登录状态失效」。
+
+### 界面
+- 主界面改为卡片式浅色布局，窗口可缩放。
+- 提示/确认弹窗统一为中文按钮与一致样式。
+- 顶栏增加就绪 / 监视中状态指示。
+
+### 其他
+- 关键模块补充中文注释，便于后续维护。
+- 需要管理员权限运行（桌面复制 API 要求）。
+
+**说明**：本分支不含任何账号 Cookie / token；用户配置目录 `Config/` 已在 `.gitignore` 中忽略。
+
 ## 编译
 请参考CI/CD工作流
 
@@ -60,3 +79,5 @@
 - [BililiveRecorder/BililiveRecorder](https://github.com/BililiveRecorder/BililiveRecorder)
 
 - [DGP-Studio/Snap.Hutao](https://github.com/DGP-Studio/Snap.Hutao)
+
+感谢原作者 [@Theresa-0328](https://github.com/Theresa-0328) 开源本项目。
